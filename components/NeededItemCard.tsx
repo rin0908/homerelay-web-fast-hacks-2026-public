@@ -8,10 +8,20 @@ export type NeededItemCardProps = {
   onClaim?: (itemId: string) => void;
   onComplete?: (itemId: string) => void;
   busy?: boolean;
+  currentMemberId?: string;
 };
 
-export function NeededItemCard({ item, onClaim, onComplete, busy = false }: NeededItemCardProps) {
+export function NeededItemCard({
+  item,
+  onClaim,
+  onComplete,
+  busy = false,
+  currentMemberId,
+}: NeededItemCardProps) {
   const isPurchased = item.status === "purchased";
+  const canComplete =
+    item.status === "purchase_intent" &&
+    (currentMemberId === undefined || item.claimedBy?.id === currentMemberId);
   return (
     <article className="rounded-2xl border border-[var(--color-divider)] bg-[#fbfaf5] p-4">
       <div className="flex items-start gap-3">
@@ -43,7 +53,7 @@ export function NeededItemCard({ item, onClaim, onComplete, busy = false }: Need
       ) : (
         <button
           className={isPurchased ? "secondary-button mt-4 w-full" : "primary-button mt-4 w-full"}
-          disabled={busy || isPurchased || !onComplete}
+          disabled={busy || !canComplete || !onComplete}
           onClick={() => onComplete?.(item.id)}
           type="button"
         >

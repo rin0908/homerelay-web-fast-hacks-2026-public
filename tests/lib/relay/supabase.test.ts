@@ -1,0 +1,295 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  SupabaseRelay,
+  SupabaseRelayError,
+  type SupabaseListEntryRow,
+} from "@/lib/relay/supabase";
+import type { PublishHandoffInput } from "@/lib/relay/types";
+
+const householdId = "10000000-0000-4000-8000-000000000001";
+const entryId = "20000000-0000-4000-8000-000000000001";
+const itemId = "30000000-0000-4000-8000-000000000001";
+const idempotencyKey = "40000000-0000-4000-8000-000000000001";
+const signedPhotoUrl = "https://example.test/private-photo?token=synthetic";
+
+type ChangeCallback = () => void;
+
+function listRow(): SupabaseListEntryRow {
+  return {
+    id: entryId,
+    household_id: householdId,
+    author: {
+      id: "50000000-0000-4000-8000-000000000001",
+      display_name: "デモヘルパー さくら",
+      role: "helper",
+    },
+    action_by: null,
+    photo_path: `${householdId}/helper/${idempotencyKey}.jpg`,
+    photo_alt: "架空の昼食の写真",
+    condition_summary: "昼食は半分ほど召し上がりました",
+    completed_summary: "水分を用意しました",
+    next_request: "夕方に水分をご確認ください",
+    status: "confirmed",
+    needed_items: [
+      {
+        id: itemId,
+        name: "トイレットペーパー",
+        status: "purchase_intent",
+        claimed_by: {
+          id: "50000000-0000-4000-8000-000000000003",
+          display_name: "デモ親族 ひなた",
+          role: "relative",
+        },
+        updated_at: "2026-08-27T10:00:00.000Z",
+      },
+    ],
+    acknowledgements: [
+      {
+        action: "confirmed",
+        created_at: "2026-08-27T10:01:00.000Z",
+        member: {
+          id: "50000000-0000-4000-8000-000000000002",
+          display_name: "デモ家族 あおい",
+          role: "family",
+        },
+      },
+    ],
+    created_at: "2026-08-27T09:00:00.000Z",
+  };
+}
+
+function publishInput(): PublishHandoffInput {
+  return {
+    idempotencyKey,
+    photo: new Blob(["synthetic-photo"], { type: "image/jpeg" }),
+    photoAlt: "架空の昼食の写真",
+    conditionSummary: "昼食は半分ほど召し上がりました",
+    completedSummary: "水分を用意しました",
+    nextRequest: "夕方に水分をご確認ください",
+    neededItems: ["トイレットペーパー", "麦茶"],
+  };
+}
+
+function createHarness(rows: SupabaseListEntryRow[] = [listRow()]) {
+  const query = {
+    select: vi.fn(),
+    eq: vi.fn(),
+    order: vi.fn(),
+    limit: vi.fn(),
+  };
+  query.select.mockReturnValue(query);
+  query.eq.mockReturnValue(query);
+  query.order.mockReturnValue(query);
+  query.limit.mockResolvedValue({ data: rows, error: null });
+
+  const createSignedUrl = vi.fn().mockResolvedValue({
+    data: { signedUrl: signedPhotoUrl },
+    error: null,
+  });
+  const callbacks = new Map<string, ChangeCallback>();
+  const channel = {
+    on: vi.fn(),
+    subscribe: vi.fn(),
+  };
+  channel.on.mockImplementation(
+    (
+      _kind: string,
+      config: { table: string },
+      callback: ChangeCallback,
+    ) => {
+      callbacks.set(config.table, callback);
+      return channel;
+    },
+  );
+  channel.subscribe.mockReturnValue(channel);
+
+  const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+  const removeChannel = vi.fn().mockResolvedValue("ok");
+  const from = vi.fn().mockReturnValue(query);
+  const storageFrom = vi.fn().mockReturnValue({ createSignedUrl });
+  const realtimeChannel = vi.fn().mockReturnValue(channel);
+  const client = {
+    channel: realtimeChannel,
+    from,
+    removeChannel,
+    rpc,
+    storage: { from: storageFrom },
+  } as unknown as SupabaseClient;
+
+  return {
+    callbacks,
+    channel,
+    client,
+    createSignedUrl,
+    from,
+    query,
+    realtimeChannel,
+    removeChannel,
+    rpc,
+    storageFrom,
+  };
+}
+
+afterEach(() => {
+  localStorage.clear();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe("SupabaseRelay", () => {
+  it("lists nested household rows and maps private signed photo URLs", async () => {
+    const harness = createHarness();
+    const relay = new SupabaseRelay(harness.client, { householdId });
+
+    await expect(relay.list()).resolves.toEqual([
+      {
+        id: entryId,
+        householdId,
+        author: {
+          id: "50000000-0000-4000-8000-000000000001",
+          displayName: "デモヘルパー さくら",
+          role: "helper",
+        },
+        photoUrl: signedPhotoUrl,
+        photoAlt: "架空の昼食の写真",
+        conditionSummary: "昼食は半分ほど召し上がりました",
+        completedSummary: "水分を用意しました",
+        nextRequest: "夕方に水分をご確認ください",
+        status: "confirmed",
+        actionBy: {
+          id: "50000000-0000-4000-8000-000000000002",
+          displayName: "デモ家族 あおい",
+          role: "family",
+        },
+        neededItems: [
+          {
+            id: itemId,
+            name: "トイレットペーパー",
+            status: "purchase_intent",
+            claimedBy: {
+              id: "50000000-0000-4000-8000-000000000003",
+              displayName: "デモ親族 ひなた",
+              role: "relative",
+            },
+            updatedAt: "2026-08-27T10:00:00.000Z",
+          },
+        ],
+        createdAt: "2026-08-27T09:00:00.000Z",
+      },
+    ]);
+
+    expect(harness.from).toHaveBeenCalledWith("entries");
+    expect(harness.query.select).toHaveBeenCalledWith(
+      expect.stringContaining("acknowledgements"),
+    );
+    expect(harness.query.eq).toHaveBeenCalledWith("household_id", householdId);
+    expect(harness.query.order).toHaveBeenCalledWith("created_at", {
+      ascending: false,
+    });
+    expect(harness.query.limit).toHaveBeenCalledWith(10);
+    expect(harness.storageFrom).toHaveBeenCalledWith("handoff-photos");
+    expect(harness.createSignedUrl).toHaveBeenCalledWith(
+      listRow().photo_path,
+      300,
+    );
+  });
+
+  it("posts the formal publish FormData contract and returns entryId", async () => {
+    const harness = createHarness();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ entryId }), {
+        headers: { "Content-Type": "application/json" },
+        status: 201,
+      }),
+    );
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { fetch: fetchMock },
+    );
+    const input = publishInput();
+
+    await expect(relay.publish(input)).resolves.toBe(entryId);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("/api/entries");
+    expect(init).toMatchObject({ method: "POST" });
+    const body = init.body as FormData;
+    expect(body.get("idempotencyKey")).toBe(idempotencyKey);
+    expect(body.get("photo")).toBeInstanceOf(Blob);
+    expect(body.get("photoAlt")).toBe(input.photoAlt);
+    expect(body.get("conditionSummary")).toBe(input.conditionSummary);
+    expect(body.get("completedSummary")).toBe(input.completedSummary);
+    expect(body.get("nextRequest")).toBe(input.nextRequest);
+    expect(JSON.parse(String(body.get("neededItems")))).toEqual(input.neededItems);
+  });
+
+  it("calls each guarded transition RPC with only its target id", async () => {
+    const harness = createHarness();
+    const relay = new SupabaseRelay(harness.client, { householdId });
+
+    await relay.acknowledge(entryId);
+    await relay.claimEntry(entryId);
+    await relay.completeEntry(entryId);
+    await relay.claimItem(itemId);
+    await relay.completeItem(itemId);
+
+    expect(harness.rpc.mock.calls).toEqual([
+      ["acknowledge_entry", { p_entry_id: entryId }],
+      ["claim_entry", { p_entry_id: entryId }],
+      ["complete_entry", { p_entry_id: entryId }],
+      ["claim_needed_item", { p_item_id: itemId }],
+      ["complete_needed_item", { p_item_id: itemId }],
+    ]);
+  });
+
+  it("debounces three household Realtime tables into one fresh list", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const callback = vi.fn();
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { debounceMs: 120 },
+    );
+
+    const unsubscribe = relay.subscribe(callback);
+
+    expect([...harness.callbacks.keys()]).toEqual([
+      "entries",
+      "needed_items",
+      "acknowledgements",
+    ]);
+    for (const trigger of harness.callbacks.values()) trigger();
+    await vi.advanceTimersByTimeAsync(119);
+    expect(callback).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(harness.query.limit).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    expect(harness.removeChannel).toHaveBeenCalledWith(harness.channel);
+  });
+
+  it("surfaces live publish and RPC errors without writing demo storage", async () => {
+    const harness = createHarness();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    harness.rpc.mockResolvedValue({ data: null, error: { message: "denied" } });
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { fetch: fetchMock },
+    );
+    localStorage.setItem("homerelay:demo:entries:v1", "sentinel");
+
+    await expect(relay.publish(publishInput())).rejects.toMatchObject({
+      code: "PUBLISH_FAILED",
+    });
+    await expect(relay.claimEntry(entryId)).rejects.toBeInstanceOf(
+      SupabaseRelayError,
+    );
+    expect(localStorage.getItem("homerelay:demo:entries:v1")).toBe("sentinel");
+  });
+});

@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { createHandoffDraft } from "@/lib/ai/openai-draft";
+import { getIntegrationStatus } from "@/lib/integration-status";
+import { createClient } from "@/lib/supabase/server";
+import { getCurrentSession } from "@/lib/supabase/session";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -18,6 +21,24 @@ function baseMimeType(type: string) {
 }
 
 export async function POST(request: Request) {
+  const integration = getIntegrationStatus();
+  if (integration.dataMode === "misconfigured") {
+    return NextResponse.json(
+      { error: "Supabase本番モードが設定されていません" },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  if (integration.dataMode === "supabase") {
+    const supabase = await createClient();
+    const session = supabase ? await getCurrentSession(supabase) : null;
+    if (!session) {
+      return NextResponse.json(
+        { error: "ログインが必要です" },
+        { status: 401, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+  }
+
   const contentLength = Number(request.headers.get("content-length") || 0);
   if (contentLength > MAX_AUDIO_BYTES + 512_000) {
     return NextResponse.json({ error: "音声が長すぎます" }, { status: 413 });

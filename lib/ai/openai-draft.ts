@@ -85,7 +85,7 @@ async function createLiveDraft(audio: File): Promise<HandoffDraft> {
 }
 
 export async function createHandoffDraft(audio: File): Promise<DraftResult> {
-  if (getIntegrationStatus().openai !== "live") {
+  if (!getIntegrationStatus().openai.active) {
     return { mode: "demo", draft: structuredClone(SYNTHETIC_AI_DRAFT) };
   }
 

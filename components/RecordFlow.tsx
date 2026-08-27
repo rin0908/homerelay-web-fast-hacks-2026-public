@@ -2,27 +2,39 @@
 
 /* eslint-disable @next/next/no-img-element -- Local Blob preview is short-lived and never uploaded by this step. */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CameraCapture } from "@/components/CameraCapture";
 import { ConfirmDraft } from "@/components/ConfirmDraft";
 import Link from "next/link";
 import { Check, Send } from "@/components/Icons";
 import { VoiceRecorder } from "@/components/VoiceRecorder";
 import type { DraftResult, HandoffDraft } from "@/lib/ai/draft";
-import { publishDemoEntry } from "@/lib/demo-relay";
 import type { ProcessedImage } from "@/lib/media/image";
-import type { HandoffEntry } from "@/types/handoff";
+import { createDemoRelay } from "@/lib/relay/demo";
+import { createSupabaseRelay } from "@/lib/relay/supabase";
+import type {
+  HandoffRelay,
+  HandoffRelayContext,
+  RelayMode,
+  UuidString,
+} from "@/lib/relay/types";
+import { createClient } from "@/lib/supabase/client";
 
-function blobToDataUrl(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("photo read failed"));
-    reader.onload = () => resolve(String(reader.result));
-    reader.readAsDataURL(blob);
-  });
-}
-
-export function RecordFlow() {
+export function RecordFlow({
+  context,
+  mode,
+}: {
+  context: HandoffRelayContext;
+  mode: RelayMode;
+}) {
+  const relay = useMemo<HandoffRelay | null>(() => {
+    if (mode === "demo") return createDemoRelay(context);
+    const client = createClient();
+    return client
+      ? createSupabaseRelay(client, { householdId: context.householdId })
+      : null;
+  }, [context, mode]);
+  const idempotencyKey = useRef<UuidString | null>(null);
   const [accepted, setAccepted] = useState<{ photo: ProcessedImage; url: string } | null>(null);
   const [draftResult, setDraftResult] = useState<DraftResult | null>(null);
   const [confirmedDraft, setConfirmedDraft] = useState<HandoffDraft | null>(null);
@@ -51,27 +63,20 @@ export function RecordFlow() {
     setSharing(true);
     setShareError(false);
     try {
-      const entryId = crypto.randomUUID();
-      const createdAt = new Date().toISOString();
-      const entry: HandoffEntry = {
-        id: entryId,
-        householdId: "synthetic-demo-household",
-        author: { id: "demo-helper-sakura", displayName: "デモヘルパー さくら", role: "helper" },
-        photoUrl: await blobToDataUrl(photo.blob),
-        photoAlt: "合成デモで撮影した申し送り写真",
+      if (!relay) throw new Error("relay unavailable");
+      idempotencyKey.current ??= crypto.randomUUID() as UuidString;
+      await relay.publish({
+        idempotencyKey: idempotencyKey.current,
+        photo: photo.blob,
+        photoAlt:
+          mode === "demo"
+            ? "合成デモで撮影した申し送り写真"
+            : "本人確認後に共有された申し送り写真",
         conditionSummary: confirmedDraft.conditionSummary,
         completedSummary: confirmedDraft.completedSummary,
         nextRequest: confirmedDraft.nextRequest,
-        status: "confirmed",
-        neededItems: confirmedDraft.neededItems.map((name, index) => ({
-          id: `${entryId}-item-${index}`,
-          name,
-          status: "needed",
-          updatedAt: createdAt,
-        })),
-        createdAt,
-      };
-      publishDemoEntry(entry);
+        neededItems: confirmedDraft.neededItems,
+      });
       setShared(true);
     } catch {
       setShareError(true);
@@ -90,7 +95,11 @@ export function RecordFlow() {
           <h2 className="mt-4 text-2xl font-semibold text-[var(--color-heading)]" id="shared-title">
             家族画面へ共有しました
           </h2>
-          <p className="mt-2 text-[var(--color-secondary)]">開いている家族タブへすぐ反映されます。</p>
+          <p className="mt-2 text-[var(--color-secondary)]">
+            {mode === "demo"
+              ? "開いている合成デモの家族タブへすぐ反映されます。"
+              : "ログイン済みの家族画面へリアルタイムで反映されます。"}
+          </p>
           <Link className="primary-button mt-6 w-full" href="/">
             家族画面を見る
           </Link>
@@ -122,7 +131,11 @@ export function RecordFlow() {
           <Send aria-hidden="true" size={21} />
           {shareError ? "もう一度送る" : sharing ? "共有しています…" : "次の人へ"}
         </button>
-        <p className="mt-3 text-center text-xs text-[var(--color-secondary)]">合成デモ：このブラウザ内の家族タブへ共有します</p>
+        <p className="mt-3 text-center text-xs text-[var(--color-secondary)]">
+          {mode === "demo"
+            ? "合成デモ：このブラウザ内だけへ共有します"
+            : "本人確認済みの内容だけを世帯メンバーへ共有します"}
+        </p>
       </section>
     );
   }

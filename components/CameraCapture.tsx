@@ -24,7 +24,43 @@ function cameraErrorMessage(error: unknown) {
   if (error instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(error.name)) {
     return "カメラを許可してください";
   }
+  if (error instanceof DOMException && error.name === "NotReadableError") {
+    return "カメラが使用中です。ほかの画面を閉じて、もう一度お試しください";
+  }
+  if (error instanceof DOMException && error.name === "NotFoundError") {
+    return "利用できるカメラが見つかりませんでした";
+  }
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "カメラの準備が中断されました。もう一度お試しください";
+  }
   return "カメラを開始できませんでした。もう一度お試しください";
+}
+
+async function openCameraStream(constraints: MediaStreamConstraints) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error) {
+      lastError = error;
+      if (
+        error instanceof DOMException &&
+        ["NotAllowedError", "SecurityError", "NotFoundError", "OverconstrainedError"].includes(
+          error.name,
+        )
+      ) {
+        throw error;
+      }
+      if (attempt < 2) {
+        // Camera drivers and mobile WebViews may release a stopped track a
+        // little later than its readyState transition.
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, 250 * (attempt + 1)),
+        );
+      }
+    }
+  }
+  throw lastError;
 }
 
 export function CameraCapture({ onAccepted }: CameraCaptureProps) {
@@ -76,7 +112,7 @@ export function CameraCapture({ onAccepted }: CameraCaptureProps) {
 
     setState("requesting");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await openCameraStream({
         audio: false,
         video: {
           facingMode: { ideal: "environment" },

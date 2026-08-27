@@ -15,6 +15,8 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "verify:supabase:local": "node scripts/verify-local-supabase.mjs",
+    "verify:supabase:realtime": "node scripts/verify-local-realtime.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test:run && npm run build"
   },
   "dependencies": {
@@ -42,6 +44,7 @@
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.3",
     "jsdom": "29.1.1",
+    "supabase": "2.116.0",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
     "vitest": "4.1.11"

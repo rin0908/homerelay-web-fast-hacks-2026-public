@@ -16,6 +16,7 @@ export type HomeFeedProps = {
   onClaimItem?: (entryId: string, itemId: string) => void;
   onCompleteItem?: (entryId: string, itemId: string) => void;
   busy?: boolean;
+  currentMemberId?: string;
 };
 
 export function HomeFeed({
@@ -27,6 +28,7 @@ export function HomeFeed({
   onClaimItem,
   onCompleteItem,
   busy = false,
+  currentMemberId,
 }: HomeFeedProps) {
   if (status === "loading") {
     return (
@@ -75,6 +77,7 @@ export function HomeFeed({
       {entries.map((entry, index) => (
         <EntryCard
           busy={busy}
+          currentMemberId={currentMemberId}
           entry={entry}
           key={entry.id}
           onAcknowledge={onAcknowledge}

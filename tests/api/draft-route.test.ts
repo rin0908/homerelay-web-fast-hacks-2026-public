@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/draft/route";
 import { createHandoffDraft } from "@/lib/ai/openai-draft";
 
+vi.mock("server-only", () => ({}));
+
 const { createHandoffDraftMock } = vi.hoisted(() => ({
   createHandoffDraftMock: vi.fn(),
 }));

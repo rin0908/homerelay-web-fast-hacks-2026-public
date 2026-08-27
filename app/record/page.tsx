@@ -1,15 +1,55 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { AuthSessionBoundary } from "@/components/AuthSessionBoundary";
 import { ArrowLeft, Camera, Check, Mic, Send } from "@/components/Icons";
 import { DemoModeBanner } from "@/components/DemoModeBanner";
 import { RecordFlow } from "@/components/RecordFlow";
 import { getIntegrationStatus } from "@/lib/integration-status";
+import { DEMO_HELPER_CONTEXT } from "@/lib/relay/contexts";
+import type { HandoffRelayContext, RelayMode } from "@/lib/relay/types";
+import { getCurrentSession } from "@/lib/supabase/session";
 
-export default function RecordPlaceholderPage() {
+export default async function RecordPage() {
   const status = getIntegrationStatus();
+  if (status.dataMode === "misconfigured") {
+    return (
+      <main className="mx-auto min-h-screen w-full max-w-2xl px-5 py-12 sm:px-8">
+        <section className="soft-card p-6 sm:p-9" role="alert">
+          <p className="eyebrow">設定が必要です</p>
+          <h1 className="mt-2 text-3xl font-semibold text-[var(--color-heading)]">
+            Supabase本番モードを開始できません
+          </h1>
+          <p className="mt-3 text-[var(--color-secondary)]">
+            HomeRelay専用の公開設定を確認してください。撮影内容は保存していません。
+          </p>
+          <Link className="secondary-button mt-6" href="/">
+            今日の様子へ
+          </Link>
+        </section>
+      </main>
+    );
+  }
+
+  let context: HandoffRelayContext = DEMO_HELPER_CONTEXT;
+  let mode: RelayMode = "demo";
+  if (status.dataMode === "supabase") {
+    const session = await getCurrentSession();
+    if (!session) redirect("/login");
+    context = {
+      householdId: session.member.householdId,
+      member: {
+        displayName: session.member.displayName,
+        id: session.member.id,
+        role: session.member.role,
+      },
+    };
+    mode = "supabase";
+  }
 
   return (
+    <AuthSessionBoundary mode={mode}>
     <main className="mx-auto min-h-screen w-full max-w-4xl px-5 py-6 sm:px-8 sm:py-8">
-      {status.appMode === "demo" ? <DemoModeBanner /> : null}
+      {mode === "demo" ? <DemoModeBanner /> : null}
       <nav className="mt-6" aria-label="戻る">
         <Link
           className="inline-flex min-h-12 items-center gap-2 rounded-xl px-2 font-semibold text-[var(--color-primary)]"
@@ -51,8 +91,13 @@ export default function RecordPlaceholderPage() {
       </ol>
 
       <div className="mt-6">
-        <RecordFlow />
+        <RecordFlow
+          context={context}
+          key={`${context.householdId}:${context.member.id}`}
+          mode={mode}
+        />
       </div>
     </main>
+    </AuthSessionBoundary>
   );
 }

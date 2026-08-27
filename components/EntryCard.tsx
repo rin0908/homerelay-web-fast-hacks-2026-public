@@ -1,6 +1,7 @@
 "use client";
 
-import Image from "next/image";
+/* eslint-disable @next/next/no-img-element -- Supabase private signed URLs are short-lived and host-configurable. */
+
 import { Check, Clock3, ShieldCheck, UserRound } from "@/components/Icons";
 import { NeededItemCard, type NeededItemCardProps } from "@/components/NeededItemCard";
 import { RoleBadge } from "@/components/RoleBadge";
@@ -22,6 +23,7 @@ type EntryCardProps = {
   onClaimItem?: NeededItemCardProps["onClaim"];
   onCompleteItem?: NeededItemCardProps["onComplete"];
   busy?: boolean;
+  currentMemberId?: string;
 };
 
 export function EntryCard({
@@ -31,16 +33,16 @@ export function EntryCard({
   onClaimItem,
   onCompleteItem,
   busy = false,
+  currentMemberId,
 }: EntryCardProps) {
   return (
     <article className="soft-card overflow-hidden">
       <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#eef1ec] sm:aspect-[16/10]">
-        <Image
+        <img
           alt={entry.photoAlt}
-          className="object-cover"
-          fill
-          priority={priority}
-          sizes="(max-width: 768px) 100vw, 760px"
+          className="h-full w-full object-cover"
+          fetchPriority={priority ? "high" : "auto"}
+          loading={priority ? "eager" : "lazy"}
           src={entry.photoUrl}
         />
         <span className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full bg-[#fffdf9e8] px-3 py-2 text-xs font-semibold text-[var(--color-primary)] shadow-sm backdrop-blur">
@@ -88,6 +90,7 @@ export function EntryCard({
               {entry.neededItems.map((item) => (
                 <NeededItemCard
                   busy={busy}
+                  currentMemberId={currentMemberId}
                   item={item}
                   key={item.id}
                   onClaim={onClaimItem}
@@ -111,12 +114,22 @@ export function EntryCard({
               { action: "claimed" as const, label: "私が対応します" },
               { action: "done" as const, label: "対応しました" },
             ].map(({ action, label }) => {
-              const active = entry.status === action;
+              const active =
+                entry.status === action &&
+                (action !== "confirmed" || Boolean(entry.actionBy));
+              const allowed =
+                action === "confirmed"
+                  ? entry.status === "confirmed"
+                  : action === "claimed"
+                    ? entry.status === "confirmed"
+                    : entry.status === "claimed" &&
+                      (currentMemberId === undefined ||
+                        entry.actionBy?.id === currentMemberId);
               return (
                 <button
                   aria-pressed={active}
                   className={active ? "primary-button w-full" : "secondary-button w-full"}
-                  disabled={busy || !onAcknowledge}
+                  disabled={busy || active || !allowed || !onAcknowledge}
                   key={action}
                   onClick={() => onAcknowledge?.(entry.id, action)}
                   type="button"
