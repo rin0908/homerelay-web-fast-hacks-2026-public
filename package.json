@@ -15,6 +15,8 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "qdrant:bootstrap": "node scripts/bootstrap-qdrant.mjs",
+    "verify:qdrant": "node scripts/verify-qdrant.mjs",
     "verify:supabase:local": "node scripts/verify-local-supabase.mjs",
     "verify:supabase:realtime": "node scripts/verify-local-realtime.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test:run && npm run build"

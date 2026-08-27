@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getCurrentSession: vi.fn(),
   getIntegrationStatus: vi.fn(),
+  scheduleConfirmedEntryIndex: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -13,6 +14,9 @@ vi.mock("@/lib/integration-status", () => ({
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
 vi.mock("@/lib/supabase/session", () => ({
   getCurrentSession: mocks.getCurrentSession,
+}));
+vi.mock("@/lib/qdrant/indexing", () => ({
+  scheduleConfirmedEntryIndex: mocks.scheduleConfirmedEntryIndex,
 }));
 
 import { POST } from "@/app/api/entries/route";
@@ -124,6 +128,18 @@ describe("POST /api/entries", () => {
       }),
     );
     expect(bucket.remove).not.toHaveBeenCalled();
+    expect(mocks.scheduleConfirmedEntryIndex).toHaveBeenCalledWith({
+      completedSummary: "合成デモを完了",
+      conditionSummary: "合成デモの様子",
+      createdAt: expect.any(String),
+      entryId: "40000000-0000-4000-8000-000000000001",
+      householdId: HOUSEHOLD_ID,
+      neededItems: ["合成ティッシュ"],
+      nextRequest: "次の方へお願いします",
+    });
+    expect(mocks.scheduleConfirmedEntryIndex.mock.calls[0][0]).not.toHaveProperty(
+      "photoAlt",
+    );
   });
 
   it("removes only the newly uploaded photo when the transaction RPC fails", async () => {
@@ -140,6 +156,7 @@ describe("POST /api/entries", () => {
     expect(bucket.remove).toHaveBeenCalledWith([
       `${HOUSEHOLD_ID}/${MEMBER_ID}/${IDEMPOTENCY_KEY}.jpg`,
     ]);
+    expect(mocks.scheduleConfirmedEntryIndex).not.toHaveBeenCalled();
   });
 
   it("keeps a new photo when a transport error could hide a committed RPC", async () => {
@@ -154,5 +171,6 @@ describe("POST /api/entries", () => {
 
     expect(response.status).toBe(502);
     expect(bucket.remove).not.toHaveBeenCalled();
+    expect(mocks.scheduleConfirmedEntryIndex).not.toHaveBeenCalled();
   });
 });

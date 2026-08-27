@@ -13,6 +13,7 @@ test("warm home shell is complete and responsive", async ({ page }, testInfo) =>
   await expect(page.getByText("訪問ヘルパー", { exact: true }).first()).toBeVisible();
   await expect(page.getByAltText("合成デモ用の、半分ほど食べた昼食")).toBeVisible();
   await expect(page.getByText("合成デモモード")).toBeVisible();
+  await expect(page.getByText("合成候補（Qdrant未接続）")).toBeVisible();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);

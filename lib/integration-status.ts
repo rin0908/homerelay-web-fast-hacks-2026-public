@@ -1,5 +1,7 @@
 import "server-only";
 
+import { isQdrantConfigured } from "@/lib/qdrant/env";
+
 export type IntegrationMode = "live" | "demo";
 export type DataMode = "demo" | "supabase" | "misconfigured";
 
@@ -43,6 +45,7 @@ export function getIntegrationStatus(): IntegrationStatus {
     "QDRANT_URL",
     "QDRANT_API_KEY",
   ]);
+  const qdrantLiveConfigured = isQdrantConfigured();
   const dataMode: DataMode =
     requestedDataMode === "demo"
       ? "demo"
@@ -72,6 +75,9 @@ export function getIntegrationStatus(): IntegrationStatus {
       supabaseAdminConfigured,
       dataMode === "supabase" && supabaseAdminConfigured,
     ),
-    qdrant: service(qdrantConfigured, !forcedDemo && qdrantConfigured),
+    qdrant: service(
+      qdrantConfigured,
+      dataMode === "supabase" && qdrantLiveConfigured,
+    ),
   };
 }

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { HomeFeed, type HomeFeedStatus } from "@/components/HomeFeed";
+import { RelatedHandoffsPanel } from "@/components/RelatedHandoffsPanel";
 import { createDemoRelay } from "@/lib/relay/demo";
 import { createSupabaseRelay } from "@/lib/relay/supabase";
 import type {
@@ -135,6 +136,11 @@ export function RelayHomeFeed({
         <p className="mb-4 rounded-xl bg-[#fff4e7] p-3 text-sm font-semibold text-[#85572f]" role="alert">
           {errorMessage}
         </p>
+      ) : null}
+      {entries.length > 0 ? (
+        <div className="mb-6">
+          <RelatedHandoffsPanel entry={entries[0]} mode={mode} />
+        </div>
       ) : null}
       <HomeFeed
         busy={busy}

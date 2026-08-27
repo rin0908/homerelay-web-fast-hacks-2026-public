@@ -6,6 +6,7 @@ import {
   validatePhoto,
 } from "@/lib/entries/publish";
 import { getIntegrationStatus } from "@/lib/integration-status";
+import { scheduleConfirmedEntryIndex } from "@/lib/qdrant/indexing";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentSession } from "@/lib/supabase/session";
 
@@ -119,6 +120,16 @@ export async function POST(request: Request) {
       status,
     );
   }
+
+  scheduleConfirmedEntryIndex({
+    completedSummary: fields.completedSummary,
+    conditionSummary: fields.conditionSummary,
+    createdAt: new Date().toISOString(),
+    entryId,
+    householdId: session.member.householdId,
+    neededItems: fields.neededItems,
+    nextRequest: fields.nextRequest,
+  });
 
   return NextResponse.json(
     { entryId },

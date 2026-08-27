@@ -58,8 +58,8 @@
   Acceptance: Exact words are used; transitions persist and update another device; duplicate claims are handled safely.
   Verify: State-transition tests and two-client manual check.
 
-- [ ] **8. Integrate Qdrant meaningfully — Not started**
-  Current status: The pinned SDK and environment-variable names exist, but there is no adapter, collection bootstrap, query/upsert, or live test.
+- [ ] **8. Integrate Qdrant meaningfully — Implementation complete; live credential gate pending**
+  Current status: The server-only Cloud Inference adapter, deterministic upsert, household/type/current-entry filters, Supabase RLS candidate revalidation, collection bootstrap, live verifier, non-blocking fallback, and related-candidate UI are implemented. Unit/API/component tests pass. `QDRANT_URL` and `QDRANT_API_KEY` are absent, so bootstrap/live search were not run and this item is not marked complete.
   Spec ref: `spec.md > Qdrant`; `prd.md > Submission Proof Points`
   What to build: Server-only embedding/upsert/query adapter, collection bootstrap note/script, household-filtered related entries, duplicate open-item warning, graceful fallback.
   Acceptance: Live credentials produce at least one semantic result; cross-household records never return; Qdrant downtime does not block sharing.

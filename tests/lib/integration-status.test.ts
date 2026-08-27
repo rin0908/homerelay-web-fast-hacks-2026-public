@@ -12,6 +12,10 @@ const ENV_NAMES = [
   "OPENAI_API_KEY",
   "QDRANT_URL",
   "QDRANT_API_KEY",
+  "QDRANT_COLLECTION",
+  "QDRANT_EMBEDDING_MODEL",
+  "QDRANT_TIMEOUT_MS",
+  "QDRANT_VECTOR_SIZE",
 ] as const;
 
 const ORIGINAL_ENV = Object.fromEntries(
@@ -64,6 +68,26 @@ describe("getIntegrationStatus", () => {
       supabase: { active: true, configured: true, connectionVerified: false },
       supabaseAdmin: { active: false, configured: false },
       qdrant: { active: false, configured: false },
+    });
+  });
+
+  it("never activates Qdrant outside authenticated Supabase mode", () => {
+    for (const name of ENV_NAMES) delete process.env[name];
+    process.env.QDRANT_URL = "https://synthetic.qdrant.test";
+    process.env.QDRANT_API_KEY = "synthetic-qdrant-key";
+
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "demo",
+      qdrant: { active: false, configured: true, connectionVerified: false },
+    });
+
+    process.env.HOMERELAY_DATA_MODE = "supabase";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "synthetic-publishable";
+
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "supabase",
+      qdrant: { active: true, configured: true, connectionVerified: false },
     });
   });
 
