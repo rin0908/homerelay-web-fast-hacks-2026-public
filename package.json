@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "audit:privacy": "node scripts/privacy-audit.mjs",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
@@ -15,11 +16,19 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:e2e:live": "playwright test tests/e2e/live-flow.spec.ts --project=desktop-1280",
     "qdrant:bootstrap": "node scripts/bootstrap-qdrant.mjs",
     "verify:qdrant": "node scripts/verify-qdrant.mjs",
+    "neo4j:bootstrap": "node scripts/bootstrap-neo4j.mjs",
+    "verify:neo4j": "node scripts/verify-neo4j.mjs",
+    "verify:datadog": "node scripts/verify-datadog.mjs",
+    "verify:sponsors": "npm run verify:qdrant && npm run neo4j:bootstrap && npm run verify:neo4j && npm run verify:datadog",
+    "supabase:provision:local": "node scripts/provision-local-demo-users.mjs",
     "verify:supabase:local": "node scripts/verify-local-supabase.mjs",
     "verify:supabase:realtime": "node scripts/verify-local-realtime.mjs",
-    "verify": "npm run lint && npm run typecheck && npm run test:run && npm run build"
+    "verify:supabase:cloud": "node scripts/verify-cloud-supabase.mjs",
+    "verify": "npm run lint && npm run typecheck && npm run test:run && npm run build",
+    "verify:release": "npm run lint && npm run typecheck && npm run test:run && npm run test:e2e && npm run build && npm run audit:privacy"
   },
   "dependencies": {
     "@qdrant/js-client-rest": "1.19.0",
@@ -49,6 +58,7 @@
     "supabase": "2.116.0",
     "tailwindcss": "4.3.3",
     "typescript": "6.0.3",
+    "undici": "7.29.0",
     "vitest": "4.1.11"
   }
 }

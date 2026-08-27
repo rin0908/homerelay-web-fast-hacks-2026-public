@@ -1,28 +1,33 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 const URL_ENV_NAME = "HOMERELAY_TEST_SUPABASE_URL";
 const KEY_ENV_NAME = "HOMERELAY_TEST_SUPABASE_PUBLISHABLE_KEY";
+const SECRET_KEY_ENV_NAME = "HOMERELAY_TEST_SUPABASE_SECRET_KEY";
 const SUPABASE_URL = process.env[URL_ENV_NAME]?.trim();
 const SUPABASE_PUBLISHABLE_KEY = process.env[KEY_ENV_NAME]?.trim();
+const SUPABASE_SECRET_KEY = process.env[SECRET_KEY_ENV_NAME]?.trim();
 
-const LOCAL_PASSWORD = "HomeRelayDemo2026!";
 const PHOTO_BUCKET = "handoff-photos";
 const VERIFY_IDEMPOTENCY_KEY = "f0000000-0000-4000-8000-000000000001";
 const VERIFY_ITEM_NAME = "合成ローカル検証用ティッシュ";
 const VERIFY_SUMMARY = "合成ローカル検証の申し送りです";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+let runtimePassword = "";
 
 const SYNTHETIC_ACCOUNTS = {
   familyA: {
+    id: "10000000-0000-4000-8000-000000000001",
     email: "family-a@homerelay.test",
     role: "family",
   },
   familyB: {
+    id: "20000000-0000-4000-8000-000000000001",
     email: "family-b@homerelay.test",
     role: "family",
   },
   helperA: {
+    id: "10000000-0000-4000-8000-000000000002",
     email: "helper-a@homerelay.test",
     role: "helper",
   },
@@ -38,7 +43,12 @@ function skip(message) {
 
 function redact(value) {
   let result = String(value ?? "unknown error");
-  for (const secret of [SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY]) {
+  for (const secret of [
+    SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY,
+    SUPABASE_SECRET_KEY,
+    runtimePassword,
+  ]) {
     if (secret) result = result.split(secret).join("[redacted]");
   }
   return result.replace(/[\r\n]+/g, " ").slice(0, 500);
@@ -68,11 +78,44 @@ function createTestClient() {
   });
 }
 
-async function signIn(label, account) {
+function createAdminClient() {
+  return createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      persistSession: false,
+    },
+  });
+}
+
+async function provisionRuntimePasswords() {
+  runtimePassword = `${randomBytes(32).toString("base64url")}Aa1!`;
+  const admin = createAdminClient();
+
+  for (const [label, account] of Object.entries(SYNTHETIC_ACCOUNTS)) {
+    const { data: existing, error: lookupError } =
+      await admin.auth.admin.getUserById(account.id);
+    if (lookupError) fail(`${label} のsynthetic user確認に失敗しました`, lookupError);
+    assert(
+      existing.user?.id === account.id && existing.user.email === account.email,
+      `${label} の固定synthetic userが一致しません`,
+    );
+
+    const { data: updated, error: updateError } =
+      await admin.auth.admin.updateUserById(account.id, { password: runtimePassword });
+    if (updateError) fail(`${label} のruntime password設定に失敗しました`, updateError);
+    assert(updated.user?.id === account.id, `${label} のpassword更新対象が一致しません`);
+  }
+
+  pass("Auth: 固定synthetic userへruntime-only passwordを設定");
+  return runtimePassword;
+}
+
+async function signIn(label, account, password) {
   const client = createTestClient();
   const { data, error } = await client.auth.signInWithPassword({
     email: account.email,
-    password: LOCAL_PASSWORD,
+    password,
   });
 
   if (error) fail(`${label} のsign-inに失敗しました`, error);
@@ -90,11 +133,11 @@ async function signIn(label, account) {
   return { client, membership };
 }
 
-async function verifyInvitationOnly() {
+async function verifyInvitationOnly(password) {
   const client = createTestClient();
   const { data, error } = await client.auth.signUp({
     email: `uninvited-${randomUUID()}@homerelay.test`,
-    password: LOCAL_PASSWORD,
+    password,
   });
 
   assert(error, "未招待ユーザーのsign-upが拒否されませんでした");
@@ -274,6 +317,7 @@ async function main() {
   const missing = [
     [URL_ENV_NAME, SUPABASE_URL],
     [KEY_ENV_NAME, SUPABASE_PUBLISHABLE_KEY],
+    [SECRET_KEY_ENV_NAME, SUPABASE_SECRET_KEY],
   ]
     .filter(([, value]) => !value)
     .map(([name]) => name);
@@ -291,16 +335,22 @@ async function main() {
     return;
   }
 
-  if (!LOOPBACK_HOSTS.has(parsedUrl.hostname)) {
+  if (
+    !["http:", "https:"].includes(parsedUrl.protocol) ||
+    parsedUrl.username ||
+    parsedUrl.password ||
+    !LOOPBACK_HOSTS.has(parsedUrl.hostname)
+  ) {
     skip(`${URL_ENV_NAME} はloopbackのローカルSupabaseを指す必要があります。接続していません。`);
     return;
   }
 
-  const familyA = await signIn("family A", SYNTHETIC_ACCOUNTS.familyA);
-  const familyB = await signIn("family B", SYNTHETIC_ACCOUNTS.familyB);
-  const helperA = await signIn("helper A", SYNTHETIC_ACCOUNTS.helperA);
+  const password = await provisionRuntimePasswords();
+  const familyA = await signIn("family A", SYNTHETIC_ACCOUNTS.familyA, password);
+  const familyB = await signIn("family B", SYNTHETIC_ACCOUNTS.familyB, password);
+  const helperA = await signIn("helper A", SYNTHETIC_ACCOUNTS.helperA, password);
 
-  await verifyInvitationOnly();
+  await verifyInvitationOnly(password);
   await verifyDataApi(familyA, familyB, helperA);
   await verifyStorage(helperA, familyB);
 }

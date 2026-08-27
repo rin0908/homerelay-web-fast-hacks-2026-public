@@ -1,5 +1,5 @@
 -- Synthetic HomeRelay-only local accounts. These reserved .test addresses are not real people.
--- Local password for all four accounts: HomeRelayDemo2026!
+-- Every reset assigns an unreachable random seed password; verification rotates it at runtime.
 
 insert into auth.users (
   instance_id,
@@ -27,7 +27,7 @@ values
     'authenticated',
     'authenticated',
     'family-a@homerelay.test',
-    crypt('HomeRelayDemo2026!', gen_salt('bf')),
+    crypt(encode(gen_random_bytes(32), 'hex'), gen_salt('bf')),
     now(),
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{}'::jsonb,
@@ -46,7 +46,7 @@ values
     'authenticated',
     'authenticated',
     'helper-a@homerelay.test',
-    crypt('HomeRelayDemo2026!', gen_salt('bf')),
+    crypt(encode(gen_random_bytes(32), 'hex'), gen_salt('bf')),
     now(),
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{}'::jsonb,
@@ -65,7 +65,7 @@ values
     'authenticated',
     'authenticated',
     'relative-a@homerelay.test',
-    crypt('HomeRelayDemo2026!', gen_salt('bf')),
+    crypt(encode(gen_random_bytes(32), 'hex'), gen_salt('bf')),
     now(),
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{}'::jsonb,
@@ -84,7 +84,7 @@ values
     'authenticated',
     'authenticated',
     'family-b@homerelay.test',
-    crypt('HomeRelayDemo2026!', gen_salt('bf')),
+    crypt(encode(gen_random_bytes(32), 'hex'), gen_salt('bf')),
     now(),
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{}'::jsonb,

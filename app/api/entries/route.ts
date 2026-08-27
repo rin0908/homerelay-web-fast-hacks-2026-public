@@ -5,7 +5,10 @@ import {
   parsePublishFields,
   validatePhoto,
 } from "@/lib/entries/publish";
+import { withApiMetrics } from "@/lib/datadog/instrumentation";
+import { readBoundedRequest } from "@/lib/http/bounded-request";
 import { getIntegrationStatus } from "@/lib/integration-status";
+import { scheduleConfirmedHandoffGraphSync } from "@/lib/neo4j/sync";
 import { scheduleConfirmedEntryIndex } from "@/lib/qdrant/indexing";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentSession } from "@/lib/supabase/session";
@@ -37,15 +40,18 @@ async function sha256Hex(file: File): Promise<string> {
   ).join("");
 }
 
-export async function POST(request: Request) {
+async function postEntry(request: Request) {
   const integration = getIntegrationStatus();
   if (integration.dataMode !== "supabase") {
     return jsonError("Supabase本番モードが設定されていません", 503);
   }
 
-  const contentLength = Number(request.headers.get("content-length") || 0);
-  if (contentLength > MAX_PUBLISH_BODY_BYTES) {
+  const bounded = await readBoundedRequest(request, MAX_PUBLISH_BODY_BYTES);
+  if (bounded.status === "too_large") {
     return jsonError("写真が大きすぎます", 413);
+  }
+  if (bounded.status === "malformed") {
+    return jsonError("共有内容を読み取れませんでした", 400);
   }
 
   const supabase = await createClient();
@@ -56,7 +62,7 @@ export async function POST(request: Request) {
 
   let formData: FormData;
   try {
-    formData = await request.formData();
+    formData = await bounded.request.formData();
   } catch {
     return jsonError("共有内容を読み取れませんでした", 400);
   }
@@ -121,15 +127,53 @@ export async function POST(request: Request) {
     );
   }
 
+  const createdAt = new Date().toISOString();
   scheduleConfirmedEntryIndex({
     completedSummary: fields.completedSummary,
     conditionSummary: fields.conditionSummary,
-    createdAt: new Date().toISOString(),
+    createdAt,
     entryId,
     householdId: session.member.householdId,
     neededItems: fields.neededItems,
     nextRequest: fields.nextRequest,
   });
+
+  if (integration.neo4j.active) {
+    try {
+      let graphNeededItems: Array<{ id: string; name: string }> = [];
+      const { data: itemRows, error: itemReadError } = await supabase
+        .from("needed_items")
+        .select("id, name, entry_id, household_id")
+        .eq("entry_id", entryId);
+      if (
+        !itemReadError &&
+        Array.isArray(itemRows) &&
+        itemRows.every(
+          (item) =>
+            typeof item.id === "string" &&
+            typeof item.name === "string" &&
+            item.entry_id === entryId &&
+            item.household_id === session.member.householdId,
+        )
+      ) {
+        graphNeededItems = itemRows.map((item) => ({
+          id: item.id,
+          name: item.name,
+        }));
+      }
+
+      scheduleConfirmedHandoffGraphSync({
+        authorMemberId: session.member.id,
+        authorRole: session.member.role,
+        createdAt,
+        entryId,
+        householdId: session.member.householdId,
+        neededItems: graphNeededItems,
+      });
+    } catch {
+      // Optional graph projection can never change the confirmed share result.
+    }
+  }
 
   return NextResponse.json(
     { entryId },
@@ -139,3 +183,5 @@ export async function POST(request: Request) {
     },
   );
 }
+
+export const POST = withApiMetrics("entries", postEntry);

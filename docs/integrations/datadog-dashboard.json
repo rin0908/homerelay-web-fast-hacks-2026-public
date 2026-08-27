@@ -1,0 +1,55 @@
+{
+  "title": "HomeRelay MVP",
+  "description": "数値のみ。写真・音声・氏名・申し送り本文・IDは送信しません。",
+  "layout_type": "ordered",
+  "widgets": [
+    {
+      "definition": {
+        "title": "API処理時間（route別）",
+        "type": "timeseries",
+        "requests": [
+          {
+            "display_type": "line",
+            "q": "avg:homerelay.api.duration_ms{service:homerelay} by {route}",
+            "style": {
+              "line_type": "solid",
+              "line_width": "normal",
+              "palette": "dog_classic"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "下書き処理時間（OpenAI / 合成）",
+        "type": "timeseries",
+        "requests": [
+          {
+            "display_type": "line",
+            "q": "avg:homerelay.ai.duration_ms{service:homerelay} by {mode,outcome}",
+            "style": {
+              "line_type": "solid",
+              "line_width": "normal",
+              "palette": "warm"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "definition": {
+        "title": "APIエラー数",
+        "type": "query_value",
+        "requests": [
+          {
+            "aggregator": "sum",
+            "q": "sum:homerelay.api.error_count{service:homerelay}.as_count()"
+          }
+        ],
+        "autoscale": true,
+        "precision": 0
+      }
+    }
+  ]
+}

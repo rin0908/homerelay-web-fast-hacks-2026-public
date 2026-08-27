@@ -12,4 +12,10 @@ export default defineConfig([
     "test-results/**",
     "next-env.d.ts",
   ]),
+  {
+    files: ["app/**/*.{js,jsx,ts,tsx}", "components/**/*.{js,jsx,ts,tsx}", "lib/**/*.{js,jsx,ts,tsx}"],
+    rules: {
+      "no-console": "error",
+    },
+  },
 ]);

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createHandoffDraft } from "@/lib/ai/openai-draft";
+import {
+  withAiMetrics,
+  withApiMetrics,
+} from "@/lib/datadog/instrumentation";
+import { readBoundedRequest } from "@/lib/http/bounded-request";
 import { getIntegrationStatus } from "@/lib/integration-status";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentSession } from "@/lib/supabase/session";
@@ -20,7 +25,7 @@ function baseMimeType(type: string) {
   return type.split(";", 1)[0].toLowerCase();
 }
 
-export async function POST(request: Request) {
+async function postDraft(request: Request) {
   const integration = getIntegrationStatus();
   if (integration.dataMode === "misconfigured") {
     return NextResponse.json(
@@ -39,14 +44,23 @@ export async function POST(request: Request) {
     }
   }
 
-  const contentLength = Number(request.headers.get("content-length") || 0);
-  if (contentLength > MAX_AUDIO_BYTES + 512_000) {
+  const bounded = await readBoundedRequest(
+    request,
+    MAX_AUDIO_BYTES + 512_000,
+  );
+  if (bounded.status === "too_large") {
     return NextResponse.json({ error: "音声が長すぎます" }, { status: 413 });
+  }
+  if (bounded.status === "malformed") {
+    return NextResponse.json(
+      { error: "音声を読み取れませんでした" },
+      { status: 400 },
+    );
   }
 
   let formData: FormData;
   try {
-    formData = await request.formData();
+    formData = await bounded.request.formData();
   } catch {
     return NextResponse.json({ error: "音声を読み取れませんでした" }, { status: 400 });
   }
@@ -63,7 +77,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await createHandoffDraft(audio);
+    const result = await withAiMetrics(() => createHandoffDraft(audio), {
+      modeOnError: integration.openai?.active ? "openai" : "synthetic",
+    });
     return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" },
     });
@@ -74,3 +90,5 @@ export async function POST(request: Request) {
     );
   }
 }
+
+export const POST = withApiMetrics("draft", postDraft);

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { isDatadogConfigured } from "@/lib/datadog/env";
+import { isNeo4jConfigured } from "@/lib/neo4j/env";
 import { isQdrantConfigured } from "@/lib/qdrant/env";
 
 export type IntegrationMode = "live" | "demo";
@@ -19,8 +21,9 @@ export type IntegrationStatus = {
   configurationIssue?: "supabase_public_config_missing";
   openai: ServiceStatus;
   supabase: ServiceStatus;
-  supabaseAdmin: ServiceStatus;
   qdrant: ServiceStatus;
+  neo4j: ServiceStatus;
+  datadog: ServiceStatus;
 };
 
 function hasEveryEnvironmentVariable(names: string[]): boolean {
@@ -38,14 +41,21 @@ export function getIntegrationStatus(): IntegrationStatus {
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   ]);
-  const supabaseAdminConfigured = hasEveryEnvironmentVariable([
-    "SUPABASE_SECRET_KEY",
-  ]);
   const qdrantConfigured = hasEveryEnvironmentVariable([
     "QDRANT_URL",
     "QDRANT_API_KEY",
   ]);
   const qdrantLiveConfigured = isQdrantConfigured();
+  const neo4jConfigured = hasEveryEnvironmentVariable([
+    "NEO4J_URI",
+    "NEO4J_USERNAME",
+    "NEO4J_PASSWORD",
+  ]);
+  const neo4jLiveConfigured = isNeo4jConfigured();
+  const datadogConfigured = Boolean(
+    process.env.DD_API_KEY?.trim() || process.env.DATADOG_API_KEY?.trim(),
+  );
+  const datadogLiveConfigured = isDatadogConfigured();
   const dataMode: DataMode =
     requestedDataMode === "demo"
       ? "demo"
@@ -71,13 +81,17 @@ export function getIntegrationStatus(): IntegrationStatus {
       supabaseConfigured,
       dataMode === "supabase" && supabaseConfigured,
     ),
-    supabaseAdmin: service(
-      supabaseAdminConfigured,
-      dataMode === "supabase" && supabaseAdminConfigured,
-    ),
     qdrant: service(
       qdrantConfigured,
       dataMode === "supabase" && qdrantLiveConfigured,
+    ),
+    neo4j: service(
+      neo4jConfigured,
+      dataMode === "supabase" && neo4jLiveConfigured,
+    ),
+    datadog: service(
+      datadogConfigured,
+      dataMode === "supabase" && datadogLiveConfigured,
     ),
   };
 }

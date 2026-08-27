@@ -1,7 +1,44 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.setTimeout(60_000);
+
+const EXPECTED_SECURITY_HEADERS = {
+  "cross-origin-opener-policy": "same-origin",
+  "cross-origin-resource-policy": "same-origin",
+  "permissions-policy":
+    "camera=(self), microphone=(self), geolocation=()",
+  "referrer-policy": "no-referrer",
+  "strict-transport-security": "max-age=63072000; includeSubDomains",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+} as const;
+
+async function expectNoSeriousAccessibilityViolations(page: Page) {
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  const serious = accessibility.violations.filter(
+    (violation) =>
+      violation.impact === "serious" || violation.impact === "critical",
+  );
+  expect(serious).toEqual([]);
+}
+
+test("serves security headers without framework disclosure", async ({ request }) => {
+  for (const route of ["/", "/record", "/api/status"]) {
+    const response = await request.get(route);
+    expect(response.ok(), `${route} should return a successful response`).toBe(true);
+    const headers = response.headers();
+
+    expect(headers).toMatchObject(EXPECTED_SECURITY_HEADERS);
+    const contentSecurityPolicy = headers["content-security-policy"];
+    expect(contentSecurityPolicy).toContain("default-src 'self'");
+    expect(contentSecurityPolicy).toContain("base-uri 'self'");
+    expect(contentSecurityPolicy).toContain("object-src 'none'");
+    expect(contentSecurityPolicy).toContain("frame-ancestors 'none'");
+    expect(contentSecurityPolicy).toContain("form-action 'self'");
+    expect(headers["x-powered-by"]).toBeUndefined();
+  }
+});
 
 test("warm home shell is complete and responsive", async ({ page }, testInfo) => {
   await page.goto("/");
@@ -19,11 +56,7 @@ test("warm home shell is complete and responsive", async ({ page }, testInfo) =>
   expect(overflow).toBeLessThanOrEqual(1);
   expect(await page.locator("[data-nextjs-dialog]").count()).toBe(0);
 
-  const accessibility = await new AxeBuilder({ page }).analyze();
-  const serious = accessibility.violations.filter((violation) =>
-    violation.impact === "serious" || violation.impact === "critical",
-  );
-  expect(serious).toEqual([]);
+  await expectNoSeriousAccessibilityViolations(page);
 
   await page.screenshot({
     fullPage: true,
@@ -39,6 +72,11 @@ test("record shell shows the four short steps", async ({ page }, testInfo) => {
   }
   await expect(page.getByText("確認するまで、ほかの人には共有されません。")).toBeVisible();
   expect(await page.locator("[data-nextjs-dialog]").count()).toBe(0);
+
+  await page.keyboard.press("Tab");
+  await expect(page.locator(":focus")).toBeVisible();
+
+  await expectNoSeriousAccessibilityViolations(page);
 
   await page.screenshot({
     fullPage: true,
@@ -65,6 +103,7 @@ test("camera capture stays in-page through retake and accept", async ({ page }, 
 
   expect(await page.locator("input[type=file]").count()).toBe(0);
   expect(await page.locator("[data-nextjs-dialog]").count()).toBe(0);
+  await expectNoSeriousAccessibilityViolations(page);
   await page.screenshot({
     fullPage: true,
     path: testInfo.outputPath(`camera-accepted-${testInfo.project.name}.png`),
@@ -88,6 +127,7 @@ test("voice becomes an editable draft and stays private until confirmation", asy
   await expect(page.getByRole("heading", { name: "AI下書きを確認" })).toBeVisible();
   await expect(page.getByText("合成AI下書き（OpenAI未接続）です。自由に編集できます。")).toBeVisible();
   await expect(page.getByText("まだ家族には共有されていません")).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
 
   const condition = page.getByRole("textbox", { name: "今日の様子" });
   await condition.fill("昼食は半分ほど召し上がりました（本人確認）");

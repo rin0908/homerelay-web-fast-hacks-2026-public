@@ -8,7 +8,6 @@ const ENV_NAMES = [
   "HOMERELAY_DATA_MODE",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-  "SUPABASE_SECRET_KEY",
   "OPENAI_API_KEY",
   "QDRANT_URL",
   "QDRANT_API_KEY",
@@ -16,6 +15,13 @@ const ENV_NAMES = [
   "QDRANT_EMBEDDING_MODEL",
   "QDRANT_TIMEOUT_MS",
   "QDRANT_VECTOR_SIZE",
+  "NEO4J_URI",
+  "NEO4J_USERNAME",
+  "NEO4J_PASSWORD",
+  "DD_API_KEY",
+  "DD_SITE",
+  "DATADOG_API_KEY",
+  "DATADOG_TIMEOUT_MS",
 ] as const;
 
 const ORIGINAL_ENV = Object.fromEntries(
@@ -41,6 +47,33 @@ describe("getIntegrationStatus", () => {
       openai: { active: false, configured: false, connectionVerified: false },
       supabase: { active: false, configured: false, connectionVerified: false },
       qdrant: { active: false, configured: false, connectionVerified: false },
+      neo4j: { active: false, configured: false, connectionVerified: false },
+      datadog: { active: false, configured: false, connectionVerified: false },
+    });
+  });
+
+  it("keeps optional graph and metrics adapters inactive until live mode is explicit", () => {
+    for (const name of ENV_NAMES) delete process.env[name];
+    process.env.NEO4J_URI = "neo4j+s://synthetic.databases.neo4j.io";
+    process.env.NEO4J_USERNAME = "neo4j";
+    process.env.NEO4J_PASSWORD = "synthetic-password";
+    process.env.DD_API_KEY = "a".repeat(32);
+    process.env.DD_SITE = "ap1.datadoghq.com";
+
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "demo",
+      neo4j: { active: false, configured: true },
+      datadog: { active: false, configured: true },
+    });
+
+    process.env.HOMERELAY_DATA_MODE = "supabase";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "synthetic-publishable";
+
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "supabase",
+      neo4j: { active: true, configured: true },
+      datadog: { active: true, configured: true },
     });
   });
 
@@ -56,7 +89,7 @@ describe("getIntegrationStatus", () => {
     });
   });
 
-  it("activates Supabase independently from optional Qdrant and admin keys", () => {
+  it("activates Supabase independently from optional Qdrant", () => {
     for (const name of ENV_NAMES) delete process.env[name];
     process.env.HOMERELAY_DATA_MODE = "supabase";
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
@@ -66,7 +99,6 @@ describe("getIntegrationStatus", () => {
       appMode: "live",
       dataMode: "supabase",
       supabase: { active: true, configured: true, connectionVerified: false },
-      supabaseAdmin: { active: false, configured: false },
       qdrant: { active: false, configured: false },
     });
   });

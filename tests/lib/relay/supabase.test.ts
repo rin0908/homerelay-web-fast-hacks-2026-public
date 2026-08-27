@@ -226,9 +226,16 @@ describe("SupabaseRelay", () => {
     expect(JSON.parse(String(body.get("neededItems")))).toEqual(input.neededItems);
   });
 
-  it("calls each guarded transition RPC with only its target id", async () => {
+  it("posts each guarded transition to the authenticated server route", async () => {
     const harness = createHarness();
-    const relay = new SupabaseRelay(harness.client, { householdId });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { fetch: fetchMock },
+    );
 
     await relay.acknowledge(entryId);
     await relay.claimEntry(entryId);
@@ -236,13 +243,26 @@ describe("SupabaseRelay", () => {
     await relay.claimItem(itemId);
     await relay.completeItem(itemId);
 
-    expect(harness.rpc.mock.calls).toEqual([
-      ["acknowledge_entry", { p_entry_id: entryId }],
-      ["claim_entry", { p_entry_id: entryId }],
-      ["complete_entry", { p_entry_id: entryId }],
-      ["claim_needed_item", { p_item_id: itemId }],
-      ["complete_needed_item", { p_item_id: itemId }],
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => [
+        url,
+        JSON.parse(String(init?.body)),
+      ]),
+    ).toEqual([
+      ["/api/actions", { action: "acknowledge_entry", targetId: entryId }],
+      ["/api/actions", { action: "claim_entry", targetId: entryId }],
+      ["/api/actions", { action: "complete_entry", targetId: entryId }],
+      ["/api/actions", { action: "claim_needed_item", targetId: itemId }],
+      ["/api/actions", { action: "complete_needed_item", targetId: itemId }],
     ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init).toMatchObject({
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+    }
+    expect(harness.rpc).not.toHaveBeenCalled();
   });
 
   it("debounces three household Realtime tables into one fresh list", async () => {

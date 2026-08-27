@@ -44,8 +44,8 @@
   Acceptance: Same-household access works; another household cannot select, insert, update, or access photos.
   Verify: SQL/RLS positive and negative tests; Supabase advisors where available.
 
-- [x] **6. Save confirmed handoffs and update in realtime — Complete and locally verified**
-  Current status: Supabase mode stores only the human-confirmed handoff, private photo and SHA-256-bound idempotency payload, then refreshes a second authenticated client through Postgres Changes. The browser-local relay remains a separately labeled demo fallback and is never used after a live failure.
+- [ ] **6. Save confirmed handoffs and update in realtime — Implementation complete; physical two-device gate pending**
+  Current status: Supabase mode stores only the human-confirmed handoff, private photo and SHA-256-bound idempotency payload, then refreshes a separate authenticated browser context through Postgres Changes. The browser-local relay remains a separately labeled demo fallback and is never used after a live failure. Hosted HTTPS smartphone-to-PC verification is still pending.
   Spec ref: `prd.md > Epic 3`; `spec.md > Architecture`
   What to build: Confirm/share mutation, idempotency, upload/storage ordering, confirmed-only Realtime subscription, optimistic UI with failure rollback.
   Acceptance: Second device receives a confirmed entry within seconds; drafts never appear; failed share never appears successful.
@@ -65,15 +65,15 @@
   Acceptance: Live credentials produce at least one semantic result; cross-household records never return; Qdrant downtime does not block sharing.
   Verify: Live integration test, filter-negative test, and forced-unavailable test. Clearly label demo fallback if credentials are absent.
 
-- [ ] **9. Harden privacy, errors, and accessibility — Partial**
-  Current status: Media cleanup, MIME/size checks, keyboard labels, accessibility scans, secret scans, and builds pass for the checkpoint. Server authorization, household policies, monitoring boundaries, and final live-mode scans remain.
+- [x] **9. Harden privacy, errors, and accessibility — Complete locally**
+  Current status: Real-byte streaming limits cover JSON and multipart requests even without a trustworthy Content-Length; malformed bodies return 400 and over-limit bodies return 413. Server authorization, household policies, focus/labels, dynamic-state axe scans, security headers/CSP, non-PII monitoring boundaries, dependency audit, reachable-history secret scan, client-bundle scan, and production build pass. Hosted vendor connections are separate credential gates, not hidden acceptance claims.
   Spec ref: `spec.md > Verification`; `prd.md > Edge Cases`
   What to build: Permission errors, cleanup, size/MIME limits, server authorization, focus and labels, reduced motion, secret-safe monitoring boundaries.
   Acceptance: Keyboard use is possible, errors are short and actionable, secrets/content are absent from client bundle and logs.
   Verify: Unit/integration tests, accessibility scan, secret scan, production build.
 
-- [ ] **10. Run the winning demo twice and prepare handoff — Partial**
-  Current status: The browser-local synthetic flow passed two consecutive automated phone/desktop viewport runs. A real smartphone plus separate PC, live Realtime/Qdrant, deploy instructions, and final two-run evidence remain.
+- [ ] **10. Run the winning demo twice and prepare handoff — Local evidence complete; external/manual gates pending**
+  Current status: The synthetic phone/desktop suite passes, and the HomeRelay local-Supabase flow passes twice consecutively between an isolated 390px helper context and a separate desktop family context in one 53.4-second test. README contains start, environment, live/demo separation, and exact demo instructions. A hosted HTTPS deployment, real smartphone plus separate physical PC, cloud Supabase verification, live Qdrant, and public GitHub push remain blocked by credentials/manual hardware access.
   Spec ref: `CODEX_START_HERE.md > Winning demo`
   What to build: Seed deterministic synthetic data, write exact run/deploy instructions, capture verification notes, and list live versus fallback integrations.
   Acceptance: The 60-second flow succeeds twice consecutively on a phone and family screen.

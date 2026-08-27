@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "ja-JP"
+early_access: false
+reviews:
+  profile: "assertive"
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!public/demo/**"
+    - "!tests/fixtures/**"
+    - "!package-lock.json"
+  path_instructions:
+    - path: "app/api/**"
+      instructions: |
+        認証、入力検証、世帯IDをセッションから導出していることを確認してください。
+        写真、音声、氏名、申し送り本文、ID、例外本文がログやDatadogタグへ流れないことを確認してください。
+        外部連携の失敗がSupabaseで成功した共有や操作を失敗扱いにしないことを確認してください。
+    - path: "lib/**"
+      instructions: |
+        demoとliveの明示的分離、server-only秘密情報、タイムアウト、外部応答の実行時検証を重点確認してください。
+        呼び出し元のhousehold_idを信用せず、認証済みセッションまたはRLSから導出してください。
+    - path: "supabase/**"
+      instructions: |
+        全公開テーブルとStorageで世帯membership RLSを確認してください。
+        別世帯のselect、insert、update、RPC、写真取得を拒否する負のテストを要求してください。
+    - path: "components/**"
+      instructions: |
+        56px級の操作領域、キーボード操作、明示ラベル、状態を色だけで表さないことを確認してください。
+        共有前の下書きが家族画面へ出ないことを確認してください。
+    - path: "tests/**"
+      instructions: |
+        認証失敗、別世帯拒否、重複操作、外部サービス停止、個人情報非送信の負のケースを確認してください。
+  tools:
+    eslint:
+      enabled: true
+    gitleaks:
+      enabled: true
+chat:
+  auto_reply: true

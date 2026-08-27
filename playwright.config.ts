@@ -24,7 +24,7 @@ export default defineConfig({
   use: {
     baseURL: e2eBaseUrl,
     browserName: "chromium",
-    channel: "chrome",
+    ...(process.env.CI ? {} : { channel: "chrome" }),
     locale: "ja-JP",
     permissions: ["camera", "microphone"],
     launchOptions: {

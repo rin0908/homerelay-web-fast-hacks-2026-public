@@ -305,37 +305,41 @@ export class SupabaseRelay implements HandoffRelay {
   }
 
   async acknowledge(entryId: string): Promise<void> {
-    await this.#guardedRpc("acknowledge_entry", { p_entry_id: entryId });
+    await this.#guardedAction("acknowledge_entry", entryId);
   }
 
   async claimEntry(entryId: string): Promise<void> {
-    await this.#guardedRpc("claim_entry", { p_entry_id: entryId });
+    await this.#guardedAction("claim_entry", entryId);
   }
 
   async completeEntry(entryId: string): Promise<void> {
-    await this.#guardedRpc("complete_entry", { p_entry_id: entryId });
+    await this.#guardedAction("complete_entry", entryId);
   }
 
   async claimItem(itemId: string): Promise<void> {
-    await this.#guardedRpc("claim_needed_item", { p_item_id: itemId });
+    await this.#guardedAction("claim_needed_item", itemId);
   }
 
   async completeItem(itemId: string): Promise<void> {
-    await this.#guardedRpc("complete_needed_item", { p_item_id: itemId });
+    await this.#guardedAction("complete_needed_item", itemId);
   }
 
-  async #guardedRpc(
+  async #guardedAction(
     name:
       | "acknowledge_entry"
       | "claim_entry"
       | "complete_entry"
       | "claim_needed_item"
       | "complete_needed_item",
-    parameters: { p_entry_id: string } | { p_item_id: string },
+    targetId: string,
   ): Promise<void> {
     try {
-      const { error } = await this.#client.rpc(name, parameters);
-      if (error) return fail("ACTION_FAILED");
+      const response = await this.#fetch("/api/actions", {
+        body: JSON.stringify({ action: name, targetId }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) return fail("ACTION_FAILED");
     } catch (error) {
       if (error instanceof SupabaseRelayError) throw error;
       return fail("ACTION_FAILED");

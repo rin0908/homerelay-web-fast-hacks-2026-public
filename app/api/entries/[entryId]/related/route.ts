@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { withApiMetrics } from "@/lib/datadog/instrumentation";
 import { getIntegrationStatus } from "@/lib/integration-status";
 import { createQdrantAdapter } from "@/lib/qdrant/adapter";
 import {
@@ -132,7 +133,7 @@ function available(result: QdrantRelatedResult): boolean {
   return result.status === "available";
 }
 
-export async function GET(
+async function getRelated(
   _request: Request,
   context: { params: Promise<{ entryId: string }> },
 ) {
@@ -300,3 +301,5 @@ export async function GET(
     { headers: { "Cache-Control": "no-store" } },
   );
 }
+
+export const GET = withApiMetrics("related", getRelated);
