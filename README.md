@@ -87,25 +87,33 @@ npm run supabase:provision:local
 
 ## HomeRelay専用クラウドSupabase
 
-他用途のプロジェクトを流用せず、新規HomeRelayプロジェクトを作成してください。
+HomeRelay専用プロジェクトへ実接続済みです。接続先はProject ID `czfmqaeqamepntpsakbv`、API URL `https://czfmqaeqamepntpsakbv.supabase.co`、東京リージョン `ap-northeast-1` です。migration `20260827114534_homerelay_core` は適用済みで、RLS有効なpublicテーブルは`households`、`members`、`entries`、`needed_items`、`acknowledgements`の5件、非公開bucketは`handoff-photos`、Realtime publication対象は`entries`、`needed_items`、`acknowledgements`の3件です。
+
+HomeRelayは招待制です。2026-08-28にSupabase Dashboardの「Allow new users to sign up」だけをONからOFFへ変更し、公開Auth settingsで`disable_signup: false → true`を確認しました。メール確認必須は維持され、`mailer_autoconfirm=false`、画面上の「Confirm email」はONです。signup以外の公開Auth settingsを正規化したSHA-256は変更前後とも`e2308943ad6e80fd6f9b61d72cd13ab7f615194f037080b37db404c454a62318`で、manual linking OFF、anonymous sign-in OFF、email provider ONも不変です。CLI `config push`は使わず、URL、メール、schema、migration、bucket、Realtime、API keyは変更していません。
+
+変更後のクラウド受入試験は、一般signup拒否、server-only admin `generateLink(type=invite)`による招待リンク生成と`verifyOtp(type=invite)`による消費、同世帯での共有・確認・対応引受・対応完了・購入引受・購入完了、別世帯SELECTと5つのID指定guarded RPC拒否、非公開StorageのSELECT・INSERT・UPDATE・DELETE拒否、同世帯Realtime受信、別世帯非配信をすべてPASSしました。cleanup後に検証器とは別のSQL読取で、Authユーザー、`households`、`members`、`entries`、`needed_items`、`acknowledgements`、`handoff-photos` objectがすべて0件であることを確認しています。
+
+再構築時の正式手順は次のとおりです。
 
 1. Supabase CLIで新規プロジェクトへ`link`する。
 2. `npx supabase db push`で`supabase/migrations/`だけを反映する。`supabase/seed.sql`はローカル専用なのでクラウドへ投入しない。
-3. Authの一般signupを無効にし、合成デモ用アカウントだけを管理者が作成する。
+3. Authの一般signupを無効にし、招待された合成デモ用アカウントだけをserver-only管理経路で作成する。
 4. `households`と`members`へ、そのAuth UUIDに対応する合成membershipを登録する。
 5. 公開URLとpublishable keyだけをアプリへ設定する。secret/service-role keyをブラウザへ渡さない。
 6. 下記のcloud verifierで、同世帯の正例と別世帯のData API・RPC・Storage・Realtime拒否を確認する。
 
-クラウド検証は明示opt-inが必要で、HTTPS以外、loopback、secret/service-role keyを拒否します。値は`.env.local`から自動読込されないため、合成招待アカウントの値を現在のshellへ設定します。secretをチャットやGitへ貼らないでください。
+クラウド検証は明示opt-inが必要で、URLを上記Project IDへ固定し、HTTPS以外、loopback、別Project、`.test`以外のメールを接続前に拒否します。通常クライアントはpublishable keyだけを使います。検証物を必ず回収するためのsecret keyはNode.js検証プロセス内の管理クライアントだけが使用し、browser、`.env.local`、ログ、文書、Gitへ渡しません。値は`.env.local`から自動読込されません。
 
 ```powershell
 $env:HOMERELAY_CLOUD_SUPABASE_VERIFY = "true"
-$env:HOMERELAY_CLOUD_SUPABASE_URL = "https://<HomeRelay project>.supabase.co"
+$env:HOMERELAY_CLOUD_SUPABASE_URL = "https://czfmqaeqamepntpsakbv.supabase.co"
 $env:HOMERELAY_CLOUD_SUPABASE_PUBLISHABLE_KEY = "<publishable key>"
-$env:HOMERELAY_CLOUD_FAMILY_EMAIL = "<synthetic invited family email>"
+$secure = Read-Host "server-only cleanup key" -AsSecureString
+$env:HOMERELAY_CLOUD_SUPABASE_SECRET_KEY = [System.Net.NetworkCredential]::new("", $secure).Password
+$env:HOMERELAY_CLOUD_FAMILY_EMAIL = "<synthetic family email>"
 $secure = Read-Host "family password" -AsSecureString
 $env:HOMERELAY_CLOUD_FAMILY_PASSWORD = [System.Net.NetworkCredential]::new("", $secure).Password
-$env:HOMERELAY_CLOUD_HELPER_EMAIL = "<synthetic invited helper email>"
+$env:HOMERELAY_CLOUD_HELPER_EMAIL = "<synthetic helper email>"
 $secure = Read-Host "helper password" -AsSecureString
 $env:HOMERELAY_CLOUD_HELPER_PASSWORD = [System.Net.NetworkCredential]::new("", $secure).Password
 $env:HOMERELAY_CLOUD_FOREIGN_FAMILY_EMAIL = "<other synthetic household email>"
@@ -114,11 +122,28 @@ $env:HOMERELAY_CLOUD_FOREIGN_FAMILY_PASSWORD = [System.Net.NetworkCredential]::n
 npm run verify:supabase:cloud
 ```
 
-このverifierは検証した合成entry・item・photoを監査証跡として残し、反復実行では合成データが増えます。また、一般signupが誤って有効な場合は負の検証用Auth userが作成された時点で失敗し、browser権限では削除できません。HomeRelay専用の合成環境で実行し、不要な検証データはSupabase管理画面で対象を確認してから削除してください。
+このverifierは開始時にAuth 0・対象publicテーブル5件が各0行・Storage 0を確認し、指定された相互に異なる`.test`ユーザーと既知UUIDの合成データだけを作成します。一般signup拒否に加え、メールを送信しないserver-onlyのadmin invite-linkを生成し、そのhashed tokenを招待として実際に消費できることまで確認します。cleanupはStorage、子テーブルから親テーブルの順のDatabase、Authの順で各SDK結果を確認し、即時確認に加えて遅延反映を検出する再確認も行います。終了時に0件でない場合はPASSにしません。foreign INSERTが予想外に成功した場合や応答が不明な場合も、管理クライアントが既知のpath／IDだけを回収します。一般の認可negative probeで401を扱うのは直前にAuth userとmembershipを再検証できた合成sessionに限りますが、別世帯guarded RPCは403またはSQLSTATE `42501`だけを拒否証拠とし、401はPASSにしません。429、5xx、timeout、通信失敗も認可PASSにしません。
+
+Data APIの直接INSERT／UPDATE拒否は、現行migrationではauthenticatedへのtable write GRANTがないため`42501`で拒否される権限境界の試験です。publicテーブルの世帯別writeはguarded RPC内のmembership確認で拒否し、Storageの世帯別INSERT／UPDATE／DELETEはRLS policyそのものを試験しています。直接write拒否をpublicテーブルのwrite RLS試験とは表現しません。
+
+Supabase Security AdvisorsのWARN 6件は、認証済みユーザーに意図的に公開した次の`SECURITY DEFINER` RPCに対するlint `0029`です。
+
+| RPC | 目的 | 世帯・担当境界 |
+|---|---|---|
+| `share_handoff` | 本人確認済み申し送りと必要品を冪等・一括作成 | 世帯IDを入力にせず認証membershipから導出。写真pathも同じ世帯/memberへ固定 |
+| `acknowledge_entry` | 「確認しました」を記録 | entry IDを現在世帯で照合 |
+| `claim_entry` | 「私が対応します」を記録 | entry IDを現在世帯で照合し、未引受だけ更新 |
+| `complete_entry` | 「対応しました」を記録 | 現在世帯かつ引受者本人だけ更新 |
+| `claim_needed_item` | 「購入します」を記録 | item IDを現在世帯で照合し、未引受だけ更新 |
+| `complete_needed_item` | 「購入しました」を記録 | 現在世帯かつ購入担当者本人だけ更新 |
+
+6件はすべて`public` schema、固定`search_path=''`、完全修飾した静的SQLで、動的SQLや入力をSQL構文として評価する経路はありません。EXECUTEは`postgres`（owner）、`authenticated`、`service_role`にあり、PUBLIC/anonにはありません。各関数が呼ぶ`private.current_member_id()`と`private.current_household_id()`が`auth.uid() IS NOT NULL`と`members.auth_user_id = auth.uid()`を確認し、対象行も現在世帯で照合します。クラウド試験では別世帯からID指定できる5 RPCをすべて拒否し、`share_handoff`は他世帯IDを受け取れない設計です。service-role/secret keyは一時Node.js検証プロセスだけで使い、browser bundle、`.env.local`、文書、Gitへ公開していません。このため6 WARNは意図した権限昇格境界としてschema変更なしで受容します。
+
+Performance Advisorsの初回INFO 14件は、複合foreign keyのcovering index不足6件と、空DBで未使用と判定されたindex 8件でした。合成受入試験後は後者8件が消え、現在はunindexed foreign keyのINFO 6件です。データ0件のMVPで機能・安全性への影響はなく、今回はindexを追加しません。実データ量、代表query、`EXPLAIN (ANALYZE, BUFFERS)`を確認してから追加を判断する将来項目とします。
 
 ## 環境変数
 
-browser-safeな通常設定は`.env.local`、server runtime secretはデプロイ先のsecret設定、検証用admin値は一時shell変数だけに置き、Git・チャット・画面共有へ貼らないでください。変数名だけの一覧は[.env.example](.env.example)にあります。
+browser-safeな通常設定は`.env.local`、server runtime secretはデプロイ先のsecret設定、検証用admin値は一時shell変数だけに置き、Git・チャット・画面共有へ貼らないでください。`.env.local`はGit対象外です。通常の変数名一覧は[.env.example](.env.example)にありますが、クラウドcleanup用secretはファイル保存を避けるため意図的に一時shellだけで渡します。
 
 | 変数 | 用途 |
 |---|---|
@@ -137,6 +162,7 @@ Hosted Supabase verifierでは、上記とは別に次を一時環境変数と�
 HOMERELAY_CLOUD_SUPABASE_VERIFY=true
 HOMERELAY_CLOUD_SUPABASE_URL
 HOMERELAY_CLOUD_SUPABASE_PUBLISHABLE_KEY
+HOMERELAY_CLOUD_SUPABASE_SECRET_KEY (server-only process; browser/fileへ保存しない)
 HOMERELAY_CLOUD_FAMILY_EMAIL / HOMERELAY_CLOUD_FAMILY_PASSWORD
 HOMERELAY_CLOUD_HELPER_EMAIL / HOMERELAY_CLOUD_HELPER_PASSWORD
 HOMERELAY_CLOUD_FOREIGN_FAMILY_EMAIL / HOMERELAY_CLOUD_FOREIGN_FAMILY_PASSWORD
@@ -169,6 +195,8 @@ npm run verify:sponsors
 npm run verify:supabase:cloud
 ```
 
+2026-08-28の公開前最終検証では、lint、typecheck、cloud集中テスト47/47、全unit 42 files / 308 tests、production build、privacy audit、追加秘密情報検査、`git diff --check`がすべてPASSしました。privacy auditは公開候補160ファイル、到達可能なGit履歴、本番browser配信物37ファイルを検査し、credential pattern、private media、server-secret markerを検出していません。
+
 資格情報がないlive verifierは、安全に`SKIP`して終了コード0を返します。`SKIP`は接続成功の証拠ではありません。live使用済みと記録できるのは、各commandが`PASS`またはvendor受付結果を明示し、`SKIP`がない場合だけです。
 
 ローカルSupabaseを起動した状態では、pgTAP、Auth/Data/Storage/RLS、Realtimeを追加確認します。
@@ -188,7 +216,7 @@ loopback検証に必要な`HOMERELAY_TEST_*`と`HOMERELAY_E2E_*`は、[HomeRelay
 ## 外部連携の状態
 
 - OpenAI Codex: 要件整理、実装、検証に使用済み。
-- Supabase: 専用ローカル環境でAuth/Database/Storage/Realtime/RLSを実接続確認済み。クラウドは資格情報未提供のため未接続。
+- Supabase: 専用ローカル環境に加え、HomeRelayクラウド`czfmqaeqamepntpsakbv`（東京）へ実接続済み。招待制で一般signup無効、メール確認必須を維持。管理者invite-linkの生成・消費、RLS 5表、非公開Storage、Realtime 3表、同世帯5操作の正例、別世帯拒否、厳格cleanupを確認し、試験後はAuth 0・全public表0行・Storage 0。Security WARN 6は上記安全設計として受容、Performance INFO 6は将来のquery plan確認事項。
 - OpenAI API: server-only adapterとschema検証を実装済み。資格情報未提供でlive未接続、専用live verifierは未実装です。live処理失敗時は合成結果へ偽装せず安全なエラーを返します。
 - Qdrant、Neo4j、Datadog: server-only adapter、非blockingまたは明示的な利用不能状態、live verifierを実装済み。資格情報未提供のためlive未接続。
 - CodeRabbit: `.coderabbit.yaml`を実装済み。GitHub App/PRレビュー未実施なので使用済みとは扱わない。
