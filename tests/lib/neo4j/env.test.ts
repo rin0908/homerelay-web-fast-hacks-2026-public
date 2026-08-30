@@ -33,6 +33,67 @@ describe("Neo4j environment", () => {
     expect(Object.isFrozen(config)).toBe(true);
   });
 
+  it("derives the current Aura Free database from its matching 8-character username", () => {
+    expect(
+      getNeo4jConfig({
+        ...LIVE_ENVIRONMENT,
+        NEO4J_URI: "neo4j+s://abcd1234.databases.neo4j.io",
+        NEO4J_USERNAME: "abcd1234",
+      }),
+    ).toMatchObject({
+      database: "abcd1234",
+      queryApiUrl:
+        "https://abcd1234.databases.neo4j.io/db/abcd1234/query/v2",
+      username: "abcd1234",
+    });
+  });
+
+  it("keeps an explicit database higher priority than Aura derivation", () => {
+    expect(
+      getNeo4jConfig({
+        ...LIVE_ENVIRONMENT,
+        NEO4J_DATABASE: "explicit-db",
+        NEO4J_URI: "neo4j+s://abcd1234.databases.neo4j.io",
+        NEO4J_USERNAME: "abcd1234",
+      }),
+    ).toMatchObject({
+      database: "explicit-db",
+      queryApiUrl:
+        "https://abcd1234.databases.neo4j.io/db/explicit-db/query/v2",
+    });
+  });
+
+  it.each([
+    {
+      label: "loopback",
+      uri: "http://127.0.0.1:7474",
+      username: "abcd1234",
+    },
+    {
+      label: "non-Aura host",
+      uri: "https://abcd1234.example.com",
+      username: "abcd1234",
+    },
+    {
+      label: "mismatched Aura ID",
+      uri: "neo4j+s://wxyz5678.databases.neo4j.io",
+      username: "abcd1234",
+    },
+    {
+      label: "legacy Aura username",
+      uri: "neo4j+s://abcd1234.databases.neo4j.io",
+      username: "neo4j",
+    },
+  ])("retains the neo4j default for $label", ({ uri, username }) => {
+    expect(
+      getNeo4jConfig({
+        ...LIVE_ENVIRONMENT,
+        NEO4J_URI: uri,
+        NEO4J_USERNAME: username,
+      }),
+    ).toMatchObject({ database: DEFAULT_NEO4J_DATABASE });
+  });
+
   it("permits HTTP only for an explicit loopback development server", () => {
     expect(
       getNeo4jConfig({

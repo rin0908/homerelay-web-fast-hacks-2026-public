@@ -189,7 +189,13 @@ describe("DatadogMetrics", () => {
 
   it("turns intake rejection or transport failure into a non-throwing result", async () => {
     const metrics = createDatadogMetrics({ config: CONFIG, fetch: fetchMock });
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 403 }));
+    const bodyReader = vi.fn().mockResolvedValue("private vendor response");
+    fetchMock.mockResolvedValueOnce({
+      json: bodyReader,
+      ok: false,
+      status: 403,
+      text: bodyReader,
+    });
     await expect(
       metrics.submitAiMeasurement({
         durationMs: 3,
@@ -197,6 +203,7 @@ describe("DatadogMetrics", () => {
         outcome: "success",
       }),
     ).resolves.toEqual({ status: "failed" });
+    expect(bodyReader).not.toHaveBeenCalled();
 
     fetchMock.mockRejectedValueOnce(new Error("private vendor response"));
     await expect(

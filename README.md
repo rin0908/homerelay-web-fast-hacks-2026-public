@@ -235,7 +235,15 @@ Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY_AUDIO
 
 `verify:openai`は、明示opt-in・合成WAV・一時tokenがなければ外部通信せず終了コード1で失敗します。Qdrant、Neo4j、Datadogの資格情報なしverifierは安全に`SKIP`して終了コード0を返します。どちらもlive接続成功の証拠ではなく、`PASS`またはvendor受付結果を読み戻せた場合だけ使用済みと記録します。
 
-同日の更新後検証は、lint、typecheck、46 files / 347 unit tests、14 synthetic E2E（Supabase live-only 2件は意図的skip）、production build、privacy audit、秘密情報検査、production dependency脆弱性0件、`git diff --check`がPASSしました。デモ導線は`見ました`→`私がやります`→`できました`→`買います`→`買いました`までphone 2回・desktop 2回の計4回を連続実行し、AI失敗→空の手入力→本人確認→明示共有もphone/desktopでPASSしました。
+同日の最新検証は、lint、typecheck、49 files / 374 unit tests、14 synthetic E2E（Supabase live-only 2件は意図的skip）、production build、`.env.local`の実秘密値を非表示で照合するprivacy audit、秘密情報検査、production dependency脆弱性0件、`git diff --check`がPASSしました。privacy auditは170公開候補ファイル、到達可能Git履歴、27 browser配信ファイルを検査しました。これ以前の連続デモ検証では、`見ました`→`私がやります`→`できました`→`買います`→`買いました`までphone 2回・desktop 2回の計4回を実行し、AI失敗→空の手入力→本人確認→明示共有もphone/desktopでPASSしています。
+
+### Qdrant / Neo4j live検証（2026-08-30）
+
+Qdrant Cloud Freeの`homerelay-qdrant`はHealthyです。collection bootstrap後、Cloud Inferenceによる類似申し送りと必要品の検索、別世帯filter、検証pointの削除と0件read-backがliveでPASSしました。
+
+Neo4j AuraDB Freeの`homerelay-graph`はRunningです。5つのconstraintをread-backし、Home／foreignの2つの合成graphをparameterized writeした後、家族・親族・ヘルパー・申し送り・対応担当・購入担当の関係をread-backしました。Home filterにforeign graphが混ざらないことと、両世帯のnode／relationshipをcleanup後に各0件であることもliveでPASSしました。接続層は2026 Auraのinstance identifierをusername／databaseとして扱う形式に対応していますが、この更新ではその実値を文書・Gitへ記録していません。
+
+Datadog verifierは固定の非個人tag付き合成success/failure countと処理時間だけを送る形へ強化済みです。AP1 Japanの新規登録では、異なる2つのメールアドレスで認証コードの送信と再送信を試しましたが、いずれもDatadog側の「不明なエラー」で失敗しました。API keyは作成・保存しておらず、live ingestionもUI read-backも未実行のため、Datadogは未接続・未使用です。同じ登録操作は繰り返さず、他の完成作業後に1回だけ再試行します。HackerSquadはbuilder loginまで成功しましたが、対象イベントはArchivedで、提出ボタンもproject導線もありません。project作成・提出は実行しておらず、使用済みとは扱いません。
 
 ローカルSupabaseを起動した状態では、pgTAP、Auth/Data/Storage/RLS、Realtimeを追加確認します。
 
@@ -256,9 +264,11 @@ loopback検証に必要な`HOMERELAY_TEST_*`と`HOMERELAY_E2E_*`は、[HomeRelay
 - OpenAI Codex: 要件整理、実装、検証に使用済み。
 - Supabase: 専用ローカル環境に加え、HomeRelayクラウド`czfmqaeqamepntpsakbv`（東京）へ実接続済み。招待制で一般signup無効、メール確認必須を維持。管理者invite-linkの生成・消費、RLS 5表、非公開Storage、Realtime 3表、同世帯5操作の正例、別世帯拒否、厳格cleanupを確認し、試験後はAuth 0・全public表0行・Storage 0。Security WARN 6は上記安全設計として受容、Performance INFO 6は将来のquery plan確認事項。
 - OpenAI API: **HomeRelay専用Projectへ実接続済み・live検証PASS**。server-onlyで`gpt-4o-mini-transcribe`による合成音声文字起こしと`gpt-5-mini`によるstrict構造化下書きを確認しました。本人確認前は保存・共有せず、失敗時は安全な502を返して合成結果へ偽装しません。
-- Qdrant、Neo4j、Datadog: server-only adapter、非blockingまたは明示的な利用不能状態、live verifierを実装済み。資格情報未提供のためlive未接続。
+- Qdrant: **Qdrant Cloud Freeへ実接続済み・live検証PASS**。`homerelay-qdrant`のHealthy、bootstrap、Cloud Inferenceの類似申し送り／必要品、別世帯filter、検証point削除後0件を確認しました。
+- Neo4j: **AuraDB Freeへ実接続済み・live検証PASS**。`homerelay-graph`のRunning、5 constraints、Home／foreign graphのparameterized write、関係read-back、Home filterでforeign 0件、両世帯cleanup後node／relationship各0件を確認しました。2026 Auraのusername／database形式にも対応済みです。
+- Datadog: verifierとserver-only numeric metricsは実装済みですが、AP1 Japanの認証コード送信／再送信が2つの異なるメールでDatadog側の「不明なエラー」になりました。API key未作成・未保存、live未実行のため**未接続・未使用**です。同じ登録操作は繰り返さず、他工程後に1回だけ再試行します。
 - CodeRabbit: `.coderabbit.yaml`を実装済み。GitHub App/PRレビュー未実施なので使用済みとは扱わない。
-- HackerSquad: 認証済みの当日環境を確認できず未接続。
+- HackerSquad: builder loginは成功しましたが、対象イベントがArchivedで提出ボタン／project導線がなく、project作成・提出は未実行です。提出済み・使用済みとは扱いません。
 
 詳細な目的、実装ファイル、検証、デモ箇所、必要資格情報は[SPONSOR_TOOL_EVIDENCE.md](SPONSOR_TOOL_EVIDENCE.md)にあります。
 

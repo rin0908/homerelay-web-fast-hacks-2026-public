@@ -9,7 +9,7 @@
     "dev": "next dev",
     "dev:openai-verify": "next dev --hostname 127.0.0.1 --port 3110",
     "build": "next build",
-    "audit:privacy": "node scripts/privacy-audit.mjs",
+    "audit:privacy": "node --env-file-if-exists=.env.local scripts/privacy-audit.mjs",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
