@@ -25,6 +25,12 @@ test("写真と声の申し送りを家族へ共有し、購入完了まで引�
   await familyPage.evaluate(() => window.localStorage.clear());
   await familyPage.reload();
   await expect(familyPage.getByRole("heading", { name: "今日の様子", level: 1 })).toBeVisible();
+  // Wait for the client relay subscription, not only the server-rendered shell.
+  await expect(
+    familyPage.locator("article").filter({
+      hasText: "昼食は半分ほど召し上がりました",
+    }),
+  ).toBeVisible({ timeout: 15_000 });
 
   const recordPage = await context.newPage();
   await recordPage.goto("/record");
@@ -40,7 +46,9 @@ test("写真と声の申し送りを家族へ共有し、購入完了まで引�
   await recordPage.waitForTimeout(700);
   await recordPage.getByRole("button", { name: "録音を停止" }).click();
 
-  await expect(recordPage.getByRole("heading", { name: "AI下書きを確認" })).toBeVisible();
+  await expect(
+    recordPage.getByRole("heading", { name: "AI下書きを確認" }),
+  ).toBeVisible({ timeout: 15_000 });
   await recordPage.getByRole("textbox", { name: "今日の様子" }).fill(editedCondition);
   await recordPage.getByRole("textbox", { name: "必要なもの" }).fill(neededItem);
   await recordPage.getByRole("button", { name: "これでOK" }).click();
@@ -51,15 +59,30 @@ test("写真と声の申し送りを家族へ共有し、購入完了まで引�
   await expect(recordPage.getByRole("heading", { name: "家族画面へ共有しました" })).toBeVisible();
 
   const sharedEntry = familyPage.locator("article").filter({ hasText: editedCondition }).first();
-  await expect(sharedEntry).toBeVisible();
+  await expect(sharedEntry).toBeVisible({ timeout: 10_000 });
   await expect(sharedEntry.getByText(editedCondition)).toBeVisible();
   await expect(sharedEntry.getByText(neededItem)).toBeVisible();
 
-  const purchaseIntent = sharedEntry.getByRole("button", { name: "購入します" });
+  const acknowledged = sharedEntry.getByRole("button", { name: "見ました" });
+  await expect(acknowledged).toBeEnabled();
+  await acknowledged.click();
+  await expect(acknowledged).toHaveAttribute("aria-pressed", "true");
+
+  const claimed = sharedEntry.getByRole("button", { name: "私がやります" });
+  await expect(claimed).toBeEnabled();
+  await claimed.click();
+  await expect(claimed).toHaveAttribute("aria-pressed", "true");
+
+  const completed = sharedEntry.getByRole("button", { name: "できました" });
+  await expect(completed).toBeEnabled();
+  await completed.click();
+  await expect(completed).toHaveAttribute("aria-pressed", "true");
+
+  const purchaseIntent = sharedEntry.getByRole("button", { name: "買います" });
   await expect(purchaseIntent).toBeEnabled();
   await purchaseIntent.click();
 
-  const purchased = sharedEntry.getByRole("button", { name: "購入しました" });
+  const purchased = sharedEntry.getByRole("button", { name: "買いました" });
   await expect(purchased).toBeEnabled();
   await purchased.click();
   await expect(purchased).toBeDisabled();

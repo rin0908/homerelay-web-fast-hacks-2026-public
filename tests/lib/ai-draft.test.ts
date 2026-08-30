@@ -9,6 +9,7 @@ import {
 import { createHandoffDraft } from "@/lib/ai/openai-draft";
 
 const openaiMocks = vi.hoisted(() => ({
+  clientOptions: vi.fn(),
   transcriptionCreate: vi.fn(),
   completionCreate: vi.fn(),
   toFile: vi.fn(),
@@ -18,6 +19,10 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("openai", () => {
   class OpenAIMock {
+    constructor(options: unknown) {
+      openaiMocks.clientOptions(options);
+    }
+
     audio = {
       transcriptions: { create: openaiMocks.transcriptionCreate },
     };
@@ -55,7 +60,11 @@ function audioFile(): File {
 
 function useLiveOpenAI(structuredContent: string) {
   vi.stubEnv("HOMERELAY_DEMO_MODE", "false");
+  vi.stubEnv("HOMERELAY_DATA_MODE", "supabase");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://synthetic.supabase.test");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "synthetic-publishable");
   vi.stubEnv("OPENAI_API_KEY", "unit-test-placeholder");
+  vi.stubEnv("OPENAI_PROJECT_ID", "proj_homerelay_test");
   openaiMocks.transcriptionCreate.mockResolvedValue({ text: "合成テスト音声" });
   openaiMocks.completionCreate.mockResolvedValue({
     choices: [{ message: { content: structuredContent } }],
@@ -87,6 +96,7 @@ describe("parseHandoffDraftJson", () => {
 
 describe("createHandoffDraft", () => {
   beforeEach(() => {
+    openaiMocks.clientOptions.mockReset();
     openaiMocks.transcriptionCreate.mockReset();
     openaiMocks.completionCreate.mockReset();
     openaiMocks.toFile.mockReset();
@@ -96,8 +106,8 @@ describe("createHandoffDraft", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns an isolated synthetic fallback when credentials are missing", async () => {
-    vi.stubEnv("HOMERELAY_DEMO_MODE", "false");
+  it("returns an isolated synthetic fallback only in explicit demo mode", async () => {
+    vi.stubEnv("HOMERELAY_DEMO_MODE", "true");
     vi.stubEnv("OPENAI_API_KEY", "");
 
     const first = await createHandoffDraft(audioFile());
@@ -113,6 +123,21 @@ describe("createHandoffDraft", () => {
     expect(second.draft.conditionSummary).toBe(SYNTHETIC_AI_DRAFT.conditionSummary);
   });
 
+  it("fails closed instead of fabricating a draft when live credentials are missing", async () => {
+    vi.stubEnv("HOMERELAY_DEMO_MODE", "false");
+    vi.stubEnv("HOMERELAY_DATA_MODE", "supabase");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://synthetic.supabase.test");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "synthetic-publishable");
+    vi.stubEnv("OPENAI_API_KEY", "");
+    vi.stubEnv("OPENAI_PROJECT_ID", "proj_homerelay_test");
+
+    await expect(createHandoffDraft(audioFile())).rejects.toThrow(
+      "OPENAI_NOT_CONFIGURED",
+    );
+    expect(openaiMocks.transcriptionCreate).not.toHaveBeenCalled();
+    expect(openaiMocks.completionCreate).not.toHaveBeenCalled();
+  });
+
   it("returns a validated live draft without making a real network request", async () => {
     useLiveOpenAI(JSON.stringify(VALID_DRAFT));
 
@@ -122,12 +147,49 @@ describe("createHandoffDraft", () => {
     });
     expect(openaiMocks.transcriptionCreate).toHaveBeenCalledOnce();
     expect(openaiMocks.completionCreate).toHaveBeenCalledOnce();
+    expect(openaiMocks.clientOptions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        apiKey: "unit-test-placeholder",
+        logLevel: "off",
+        maxRetries: 0,
+        project: "proj_homerelay_test",
+      }),
+    );
+    expect(openaiMocks.completionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        max_completion_tokens: 800,
+        reasoning_effort: "minimal",
+      }),
+    );
+  });
+
+  it("stops after one transcription when OpenAI returns an empty transcript", async () => {
+    useLiveOpenAI(JSON.stringify(VALID_DRAFT));
+    openaiMocks.transcriptionCreate.mockResolvedValue({ text: "   " });
+
+    await expect(createHandoffDraft(audioFile())).rejects.toThrow(
+      "OPENAI_TRANSCRIPT_EMPTY",
+    );
+    expect(openaiMocks.transcriptionCreate).toHaveBeenCalledOnce();
+    expect(openaiMocks.completionCreate).not.toHaveBeenCalled();
+  });
+
+  it("uses a fixed safe classification when transcription fails", async () => {
+    useLiveOpenAI(JSON.stringify(VALID_DRAFT));
+    openaiMocks.transcriptionCreate.mockRejectedValue(new Error("vendor detail"));
+
+    await expect(createHandoffDraft(audioFile())).rejects.toThrow(
+      "OPENAI_TRANSCRIPTION_FAILED",
+    );
+    expect(openaiMocks.completionCreate).not.toHaveBeenCalled();
   });
 
   it("rejects malformed structured JSON returned by OpenAI", async () => {
     useLiveOpenAI("{not-json");
 
-    await expect(createHandoffDraft(audioFile())).rejects.toThrow(SyntaxError);
+    await expect(createHandoffDraft(audioFile())).rejects.toThrow(
+      "OPENAI_DRAFT_SCHEMA_INVALID",
+    );
   });
 
   it("rejects structured JSON that violates the draft schema", async () => {
@@ -138,6 +200,8 @@ describe("createHandoffDraft", () => {
       }),
     );
 
-    await expect(createHandoffDraft(audioFile())).rejects.toBeInstanceOf(ZodError);
+    await expect(createHandoffDraft(audioFile())).rejects.toThrow(
+      "OPENAI_DRAFT_SCHEMA_INVALID",
+    );
   });
 });

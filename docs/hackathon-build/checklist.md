@@ -30,12 +30,12 @@
   Acceptance: On HTTPS phone, user can capture without selecting a saved photo; tracks stop and temporary images are discarded on retake/cancel.
   Verify: Browser tests for state logic and one manual smartphone camera-permission check.
 
-- [x] **4. Implement voice recording and AI draft — Complete with explicit credential fallback**
-  Current status: The server-only adapter, schema checks, editing, and confirmation boundary pass. Live OpenAI is unconnected; the UI truthfully labels the deterministic synthetic fallback.
+- [x] **4. Implement voice recording and AI draft — Complete and live verified**
+  Current status: The server-only adapter, strict schema checks, editing, and confirmation boundary pass. A 6.97-second synthetic ja-JP WAV completed live transcription with `gpt-4o-mini-transcribe` and strict structured drafting with `gpt-5-mini` in the HomeRelay-only OpenAI Project. Normal paid calls require Supabase live mode plus an invited authenticated session. The UI auto-stops at 30 seconds; the route validates the declared duration and an actual 2 MiB byte ceiling, then applies an in-runtime member/household rate and concurrency guard before the vendor call. It does not claim independent server-side media-duration decoding. The local verifier exception is non-production, loopback-bound, explicit opt-in, and protected by a one-time token. Explicit demo mode retains the labeled deterministic fallback, while a live failure returns a safe 502 and opens an empty manual form without being reported as fallback success.
   Spec ref: `spec.md > AI Contract`; `prd.md > Epic 2`
   What to build: MediaRecorder flow, server-only transcription/structuring route, schema validation, editable confirmation, safe error and synthetic demo fallback.
   Acceptance: Demo phrase produces a concise draft; nothing is shared before confirmation; raw audio/partial transcript is not logged or retained.
-  Verify: Route tests for valid, invalid, and missing-key cases; inspect logs; manually edit a draft.
+  Verify: Component test for one-time 30-second auto-stop, track release, and submission; route tests for valid, invalid, missing-key, authenticated/unauthenticated access, production/flag-off verifier rejection, declared-duration/actual-byte/rate/concurrency bounds, loopback/token isolation, empty-transcript, fixed safe error classes, strict schema, and empty manual fallback; inspect content-free logs; manually edit a draft. 2026-08-30 live evidence: Dashboard 3 requests / 588 input / 419 output tokens, organization balance $18.18→$18.18, Project display spend $0.00→$0.00, $1 hard limit unchanged, pre-confirmation save/share 0, temporary WAV residual 0.
 
 - [x] **5. Add HomeRelay-only Supabase schema and RLS — Complete and cloud verified**
   Current status: Migration `20260827114534_homerelay_core` is applied only to the dedicated HomeRelay project `czfmqaeqamepntpsakbv` in `ap-northeast-1`. General signup is disabled, email confirmation remains required, and the server-only admin invite-link generation/redemption path passes. Five public tables have RLS enabled, `handoff-photos` is private, and three tables are in the Realtime publication. Hosted same-household access and action transitions plus foreign-household SELECT/guarded-RPC/Storage/Realtime denial pass. Security Advisors WARN 6 are accepted as the intended guarded RPC boundary after the function audit below; current Performance INFO 6 are deferred to measured query-plan review for the empty-data MVP.
@@ -52,14 +52,14 @@
   Verify: Two-browser and two-device test with timestamps; duplicate-click test.
 
 - [x] **7. Implement action and needed-item states — Complete and locally verified**
-  Current status: `確認しました`, `私が対応します`, `対応しました`, `購入します`, and `購入しました` use session-derived guarded RPCs, durable attribution, ownership checks, idempotent repeats, and Realtime updates. The two-client integration test passes every transition.
+  Current status: `見ました`, `私がやります`, `できました`, `買います`, and `買いました` use session-derived guarded RPCs, durable attribution, ownership checks, idempotent repeats, and Realtime updates. The two-client integration test passes every transition.
   Spec ref: `prd.md > Epic 3` and `Epic 4`
   What to build: General acknowledgement/claim/done flow and needed-item purchase intent/purchased flow with attribution.
   Acceptance: Exact words are used; transitions persist and update another device; duplicate claims are handled safely.
   Verify: State-transition tests and two-client manual check.
 
 - [ ] **8. Integrate Qdrant meaningfully — Implementation complete; live credential gate pending**
-  Current status: The server-only Cloud Inference adapter, deterministic upsert, household/type/current-entry filters, Supabase RLS candidate revalidation, collection bootstrap, live verifier, non-blocking fallback, and related-candidate UI are implemented. Unit/API/component tests pass. `QDRANT_URL` and `QDRANT_API_KEY` are absent, so bootstrap/live search were not run and this item is not marked complete.
+  Current status: The server-only Cloud Inference adapter, deterministic upsert, household/type/current-entry filters, Supabase RLS candidate revalidation, collection bootstrap, live verifier, non-blocking fallback, and related-candidate UI are implemented. The verifier now treats delete failure as fatal, reads every synthetic point back as 0 after cleanup, and attempts one cleanup pass after a possibly partial upsert failure. Unit/API/component/script tests pass. `QDRANT_URL` and `QDRANT_API_KEY` are absent, so bootstrap/live search were not run and this item is not marked complete.
   Spec ref: `spec.md > Qdrant`; `prd.md > Submission Proof Points`
   What to build: Server-only embedding/upsert/query adapter, collection bootstrap note/script, household-filtered related entries, duplicate open-item warning, graceful fallback.
   Acceptance: Live credentials produce at least one semantic result; cross-household records never return; Qdrant downtime does not block sharing.
@@ -73,7 +73,7 @@
   Verify: Unit/integration tests, accessibility scan, secret scan, production build.
 
 - [ ] **10. Run the winning demo twice and prepare handoff — Local evidence complete; external/manual gates pending**
-  Current status: The synthetic phone/desktop suite passes, and the HomeRelay local-Supabase flow passes twice consecutively between an isolated 390px helper context and a separate desktop family context in one 53.4-second test. The dedicated hosted Supabase project is invite-only and its Auth/membership/Storage/Realtime acceptance suite passes with complete cleanup. A hosted HTTPS deployment, real smartphone plus separate physical PC, live Qdrant, and public GitHub push remain pending.
+  Current status: The offline synthetic suite passes 14 browser tests with the final action wording and explicit AI-failure manual path; the full demo flow additionally passed twice on 390px and twice on desktop. The HomeRelay local-Supabase flow previously passed twice consecutively between an isolated 390px helper context and a separate desktop family context in one 53.4-second test. Playwright now always starts its own server and disables optional vendors; the Supabase suite fulfills a strict synthetic draft in-browser so it cannot spend OpenAI credit or leave Qdrant/Neo4j data. OpenAI transcription/structured drafting and the dedicated invite-only Supabase project are live verified separately. A hosted HTTPS deployment, real smartphone plus separate physical PC, live Qdrant/Neo4j/Datadog, public GitHub/CodeRabbit review, and HackerSquad preparation remain pending.
   Spec ref: `CODEX_START_HERE.md > Winning demo`
   What to build: Seed deterministic synthetic data, write exact run/deploy instructions, capture verification notes, and list live versus fallback integrations.
   Acceptance: The 60-second flow succeeds twice consecutively on a phone and family screen.

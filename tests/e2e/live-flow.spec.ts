@@ -149,6 +149,24 @@ test.describe("HomeRelay live Supabase flow", () => {
       viewport: { height: 900, width: 1280 },
     });
 
+    // This suite verifies Supabase only; OpenAI has a separate billable live verifier.
+    await helperContext.route("**/api/draft", (route) =>
+      route.fulfill({
+        body: JSON.stringify({
+          mode: "demo",
+          draft: {
+            conditionSummary: "合成E2E下書き",
+            completedSummary: "合成E2Eで水分を用意しました",
+            nextRequest: "次の方もご確認ください",
+            neededItems: ["合成E2Eティッシュ"],
+          },
+        }),
+        contentType: "application/json",
+        headers: { "Cache-Control": "no-store" },
+        status: 200,
+      }),
+    );
+
     try {
       const familyPage = await login(familyContext, "family-a@homerelay.test");
       const helperPage = await login(helperContext, "helper-a@homerelay.test");
@@ -160,16 +178,16 @@ test.describe("HomeRelay live Supabase flow", () => {
 
         const sharedEntry = familyPage.locator("article").filter({ hasText: marker }).first();
         await expect(sharedEntry).toBeVisible({ timeout: 15_000 });
-        await sharedEntry.getByRole("button", { name: "確認しました" }).click();
-        await sharedEntry.getByRole("button", { name: "私が対応します" }).click();
-        await sharedEntry.getByRole("button", { name: "対応しました" }).click();
-        await expect(sharedEntry.getByRole("button", { name: "対応しました" })).toHaveAttribute(
+        await sharedEntry.getByRole("button", { name: "見ました" }).click();
+        await sharedEntry.getByRole("button", { name: "私がやります" }).click();
+        await sharedEntry.getByRole("button", { name: "できました" }).click();
+        await expect(sharedEntry.getByRole("button", { name: "できました" })).toHaveAttribute(
           "aria-pressed",
           "true",
         );
 
-        await sharedEntry.getByRole("button", { name: "購入します" }).click();
-        const purchased = sharedEntry.getByRole("button", { name: "購入しました" });
+        await sharedEntry.getByRole("button", { name: "買います" }).click();
+        const purchased = sharedEntry.getByRole("button", { name: "買いました" });
         await purchased.click();
         await expect(purchased).toBeDisabled();
         expect(Date.now() - startedAt).toBeLessThan(60_000);

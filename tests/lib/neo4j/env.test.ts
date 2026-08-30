@@ -54,6 +54,7 @@ describe("Neo4j environment", () => {
     [{ ...LIVE_ENVIRONMENT, HOMERELAY_DATA_MODE: "demo" }],
     [{ ...LIVE_ENVIRONMENT, HOMERELAY_DATA_MODE: undefined }],
     [{ ...LIVE_ENVIRONMENT, HOMERELAY_DEMO_MODE: " TRUE " }],
+    [{ ...LIVE_ENVIRONMENT, HOMERELAY_E2E_ISOLATE_VENDORS: "true" }],
   ])("never enables Neo4j outside explicit authenticated data mode", (environment) => {
     expect(getNeo4jConfig(environment)).toBeNull();
     expect(isNeo4jConfigured(environment)).toBe(false);

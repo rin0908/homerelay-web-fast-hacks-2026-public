@@ -6,9 +6,11 @@ vi.mock("server-only", () => ({}));
 const ENV_NAMES = [
   "HOMERELAY_DEMO_MODE",
   "HOMERELAY_DATA_MODE",
+  "HOMERELAY_E2E_ISOLATE_VENDORS",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "OPENAI_API_KEY",
+  "OPENAI_PROJECT_ID",
   "QDRANT_URL",
   "QDRANT_API_KEY",
   "QDRANT_COLLECTION",
@@ -129,12 +131,47 @@ describe("getIntegrationStatus", () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "synthetic-publishable";
     process.env.OPENAI_API_KEY = "synthetic-openai";
+    process.env.OPENAI_PROJECT_ID = "proj_synthetic_homerelay";
 
     expect(getIntegrationStatus()).toMatchObject({
       dataMode: "demo",
       requestedDataMode: "demo",
       openai: { active: false, configured: true },
       supabase: { active: false, configured: true },
+    });
+  });
+
+  it("requires an explicit live flag and project binding before OpenAI can activate", () => {
+    for (const name of ENV_NAMES) delete process.env[name];
+    process.env.OPENAI_API_KEY = "synthetic-openai";
+
+    expect(getIntegrationStatus()).toMatchObject({
+      openai: { active: false, configured: false },
+    });
+
+    process.env.OPENAI_PROJECT_ID = "proj_synthetic_homerelay";
+    expect(getIntegrationStatus()).toMatchObject({
+      openai: { active: false, configured: true },
+    });
+
+    process.env.HOMERELAY_DEMO_MODE = "false";
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "misconfigured",
+      openai: { active: false, configured: true },
+    });
+
+    process.env.HOMERELAY_DATA_MODE = "supabase";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "synthetic-publishable";
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "supabase",
+      openai: { active: true, configured: true },
+    });
+
+    process.env.HOMERELAY_E2E_ISOLATE_VENDORS = "true";
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "supabase",
+      openai: { active: false, configured: true },
     });
   });
 });

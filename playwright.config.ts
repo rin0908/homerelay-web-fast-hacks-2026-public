@@ -39,7 +39,8 @@ export default defineConfig({
   webServer: {
     command: `node scripts/playwright-web-server.mjs ${e2ePort}`,
     url: e2eBaseUrl,
-    reuseExistingServer: !liveE2e,
+    // Never inherit a developer server that may have live credentials loaded.
+    reuseExistingServer: false,
     timeout: 120_000,
   },
   projects: [

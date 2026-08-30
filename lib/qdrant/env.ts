@@ -13,6 +13,7 @@ const MAX_VECTOR_SIZE = 65_536;
 export type QdrantEnvironment = {
   HOMERELAY_DATA_MODE?: string;
   HOMERELAY_DEMO_MODE?: string;
+  HOMERELAY_E2E_ISOLATE_VENDORS?: string;
   QDRANT_API_KEY?: string;
   QDRANT_COLLECTION?: string;
   QDRANT_EMBEDDING_MODEL?: string;
@@ -34,6 +35,8 @@ function currentEnvironment(): QdrantEnvironment {
   return {
     HOMERELAY_DATA_MODE: process.env.HOMERELAY_DATA_MODE,
     HOMERELAY_DEMO_MODE: process.env.HOMERELAY_DEMO_MODE,
+    HOMERELAY_E2E_ISOLATE_VENDORS:
+      process.env.HOMERELAY_E2E_ISOLATE_VENDORS,
     QDRANT_API_KEY: process.env.QDRANT_API_KEY,
     QDRANT_COLLECTION: process.env.QDRANT_COLLECTION,
     QDRANT_EMBEDDING_MODEL: process.env.QDRANT_EMBEDDING_MODEL,
@@ -46,8 +49,11 @@ function currentEnvironment(): QdrantEnvironment {
 function isExplicitLiveMode(environment: QdrantEnvironment): boolean {
   const forcedDemo =
     environment.HOMERELAY_DEMO_MODE?.trim().toLowerCase() === "true";
+  const isolated =
+    environment.HOMERELAY_E2E_ISOLATE_VENDORS?.trim().toLowerCase() ===
+    "true";
   const dataMode = environment.HOMERELAY_DATA_MODE?.trim().toLowerCase();
-  return !forcedDemo && dataMode === "supabase";
+  return !forcedDemo && !isolated && dataMode === "supabase";
 }
 
 function parseHttpUrl(value: string): string | null {

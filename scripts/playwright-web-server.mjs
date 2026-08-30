@@ -6,6 +6,17 @@ const { startServer } = nextServerModule;
 const port = Number.parseInt(process.argv[2] ?? "3100", 10);
 const controlPort = port + 100;
 const shutdownPath = "/__homerelay_playwright_shutdown__";
+const liveE2e = process.env.HOMERELAY_E2E_LIVE === "true";
+
+// Playwright validates HomeRelay itself. Vendor connections have dedicated verifiers.
+process.env.HOMERELAY_E2E_ISOLATE_VENDORS = "true";
+process.env.HOMERELAY_OPENAI_VERIFY = "false";
+
+if (!liveE2e) {
+  // Synthetic E2E must remain offline even if a developer has live values in .env.local.
+  process.env.HOMERELAY_DEMO_MODE = "true";
+  process.env.HOMERELAY_DATA_MODE = "demo";
+}
 
 if (!Number.isInteger(port) || port < 1 || port > 65_435) {
   throw new Error("Playwright web server port is invalid.");

@@ -58,6 +58,7 @@ describe("Qdrant environment", () => {
     [{ ...LIVE_ENVIRONMENT, HOMERELAY_DATA_MODE: "demo" }],
     [{ ...LIVE_ENVIRONMENT, HOMERELAY_DATA_MODE: undefined }],
     [{ ...LIVE_ENVIRONMENT, HOMERELAY_DEMO_MODE: " TRUE " }],
+    [{ ...LIVE_ENVIRONMENT, HOMERELAY_E2E_ISOLATE_VENDORS: "true" }],
   ])("never enables Qdrant outside explicit authenticated data mode", (environment) => {
     expect(getQdrantConfig(environment)).toBeNull();
     expect(isQdrantConfigured(environment)).toBe(false);

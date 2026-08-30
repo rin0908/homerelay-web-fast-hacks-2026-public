@@ -23,12 +23,14 @@ describe("warm UI shell", () => {
   it("renders the exact handoff and purchase labels", () => {
     const { container } = render(<EntryCard entry={SYNTHETIC_ENTRIES[0]} />);
 
-    expect(screen.getByRole("button", { name: "確認しました" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "私が対応します" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "対応しました" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "購入します" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "購入しました" })).toBeInTheDocument();
-    expect(container.textContent).not.toMatch(/買います|買いました|届けました|補充しました|補充済み/);
+    expect(screen.getByRole("button", { name: "見ました" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "私がやります" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "できました" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "買います" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "買いました" })).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(
+      /確認しました|私が対応します|対応しました|購入します|購入しました|届けました|補充しました|補充済み/,
+    );
   });
 
   it("keeps loading, empty, and error states short and actionable", () => {

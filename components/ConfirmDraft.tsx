@@ -5,16 +5,24 @@ import { AlertTriangle, Check, Mic, Sparkles } from "@/components/Icons";
 import { HandoffDraftSchema, type DraftResult, type HandoffDraft } from "@/lib/ai/draft";
 
 export type ConfirmDraftProps = {
-  result: DraftResult;
+  result: DraftResult | null;
   onConfirmed: (draft: HandoffDraft) => void;
   onRecordAgain: () => void;
 };
 
 export function ConfirmDraft({ result, onConfirmed, onRecordAgain }: ConfirmDraftProps) {
-  const [conditionSummary, setConditionSummary] = useState(result.draft.conditionSummary);
-  const [completedSummary, setCompletedSummary] = useState(result.draft.completedSummary);
-  const [nextRequest, setNextRequest] = useState(result.draft.nextRequest);
-  const [neededItems, setNeededItems] = useState(result.draft.neededItems.join("\n"));
+  const [conditionSummary, setConditionSummary] = useState(
+    result?.draft.conditionSummary ?? "",
+  );
+  const [completedSummary, setCompletedSummary] = useState(
+    result?.draft.completedSummary ?? "",
+  );
+  const [nextRequest, setNextRequest] = useState(
+    result?.draft.nextRequest ?? "",
+  );
+  const [neededItems, setNeededItems] = useState(
+    result?.draft.neededItems.join("\n") ?? "",
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -47,16 +55,18 @@ export function ConfirmDraft({ result, onConfirmed, onRecordAgain }: ConfirmDraf
         <div>
           <p className="eyebrow">ステップ 3・本人確認</p>
           <h2 className="mt-1 text-xl font-semibold text-[var(--color-heading)]" id="draft-title">
-            AI下書きを確認
+            {result ? "AI下書きを確認" : "手入力で申し送りを作成"}
           </h2>
           <p className="mt-1 text-sm font-semibold text-[#85572f]">まだ家族には共有されていません</p>
         </div>
       </div>
 
       <p className="mt-5 rounded-xl border border-[var(--color-divider)] bg-[#fbfaf5] px-4 py-3 text-sm text-[var(--color-body)]">
-        {result.mode === "live"
+        {result?.mode === "live"
           ? "OpenAIで整えた下書きです。必ず本人が確認します。"
-          : "合成AI下書き（OpenAI未接続）です。自由に編集できます。"}
+          : result?.mode === "demo"
+            ? "合成AI下書き（OpenAI未接続）です。自由に編集できます。"
+            : "AIの下書きを使わず手入力します。確認するまで共有されません。"}
       </p>
 
       <form className="mt-5 space-y-5" onSubmit={submit}>

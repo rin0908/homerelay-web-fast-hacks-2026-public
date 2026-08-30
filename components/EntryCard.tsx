@@ -110,9 +110,9 @@ export function EntryCard({
           ) : null}
           <div className="grid gap-2 sm:grid-cols-3">
             {[
-              { action: "confirmed" as const, label: "確認しました" },
-              { action: "claimed" as const, label: "私が対応します" },
-              { action: "done" as const, label: "対応しました" },
+              { action: "confirmed" as const, label: "見ました" },
+              { action: "claimed" as const, label: "私がやります" },
+              { action: "done" as const, label: "できました" },
             ].map(({ action, label }) => {
               const active =
                 entry.status === action &&

@@ -25,8 +25,9 @@ HomeRelay is a warm, smartphone-first web app that lets family members, relative
 4. AI creates a short draft.
 5. Tap `これでOK`, then `次の人へ`.
 6. The family laptop updates within seconds.
-7. The family taps `購入します`, then `購入しました`.
-8. Qdrant shows a semantically related prior supply handoff or duplicate-item warning.
+7. The family taps `見ました`, `私がやります`, then `できました`.
+8. The family taps `買います`, then `買いました`.
+9. Qdrant shows a semantically related prior supply handoff or duplicate-item warning.
 
 ## Build order
 
@@ -44,4 +45,3 @@ Do not start Neo4j, CodeRabbit, or Datadog until the complete winning demo succe
 - Environment variables still required
 - Manual smartphone checks still required
 - Confirmation that CareRelay was untouched
-

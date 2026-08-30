@@ -37,6 +37,7 @@ export function RecordFlow({
   const idempotencyKey = useRef<UuidString | null>(null);
   const [accepted, setAccepted] = useState<{ photo: ProcessedImage; url: string } | null>(null);
   const [draftResult, setDraftResult] = useState<DraftResult | null>(null);
+  const [manualEntry, setManualEntry] = useState(false);
   const [confirmedDraft, setConfirmedDraft] = useState<HandoffDraft | null>(null);
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState(false);
@@ -140,11 +141,14 @@ export function RecordFlow({
     );
   }
 
-  if (draftResult) {
+  if (draftResult || manualEntry) {
     return (
       <ConfirmDraft
         onConfirmed={setConfirmedDraft}
-        onRecordAgain={() => setDraftResult(null)}
+        onRecordAgain={() => {
+          setDraftResult(null);
+          setManualEntry(false);
+        }}
         result={draftResult}
       />
     );
@@ -168,7 +172,16 @@ export function RecordFlow({
         </div>
       </div>
       </section>
-      <VoiceRecorder onDraft={setDraftResult} />
+      <VoiceRecorder
+        onDraft={(result) => {
+          setManualEntry(false);
+          setDraftResult(result);
+        }}
+        onManualEntry={() => {
+          setDraftResult(null);
+          setManualEntry(true);
+        }}
+      />
     </div>
   );
 }

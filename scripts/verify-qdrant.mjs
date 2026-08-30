@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { QdrantClient } from "@qdrant/js-client-rest";
 
@@ -6,21 +8,24 @@ const DEFAULT_COLLECTION = "homerelay_entries";
 const DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2";
 const DEFAULT_TIMEOUT_MS = 4_000;
 
-function skip(message) {
-  console.log(`[verify-qdrant] SKIP / 未接続: ${message}`);
+const GENERIC_FAILURE_MESSAGE =
+  "[verify-qdrant] FAIL: 接続、collection、Cloud Inference、世帯filter、またはcleanupを確認してください（詳細・認証情報は非表示）。";
+
+function skip(logger, message) {
+  logger.log(`[verify-qdrant] SKIP / 未接続: ${message}`);
 }
 
-function pass(message) {
-  console.log(`[verify-qdrant] PASS ${message}`);
+function pass(logger, message) {
+  logger.log(`[verify-qdrant] PASS ${message}`);
 }
 
-function safeConfiguration() {
-  const urlValue = process.env.QDRANT_URL?.trim();
-  const apiKey = process.env.QDRANT_API_KEY?.trim();
+export function safeConfiguration(environment = process.env) {
+  const urlValue = environment.QDRANT_URL?.trim();
+  const apiKey = environment.QDRANT_API_KEY?.trim();
   if (!urlValue || !apiKey) return null;
   if (
-    process.env.HOMERELAY_DEMO_MODE?.trim().toLowerCase() === "true" ||
-    process.env.HOMERELAY_DATA_MODE?.trim().toLowerCase() !== "supabase"
+    environment.HOMERELAY_DEMO_MODE?.trim().toLowerCase() === "true" ||
+    environment.HOMERELAY_DATA_MODE?.trim().toLowerCase() !== "supabase"
   ) {
     return null;
   }
@@ -44,9 +49,9 @@ function safeConfiguration() {
   }
 
   const collection =
-    process.env.QDRANT_COLLECTION?.trim() || DEFAULT_COLLECTION;
-  const model = process.env.QDRANT_EMBEDDING_MODEL?.trim() || DEFAULT_MODEL;
-  const timeoutValue = process.env.QDRANT_TIMEOUT_MS?.trim();
+    environment.QDRANT_COLLECTION?.trim() || DEFAULT_COLLECTION;
+  const model = environment.QDRANT_EMBEDDING_MODEL?.trim() || DEFAULT_MODEL;
+  const timeoutValue = environment.QDRANT_TIMEOUT_MS?.trim();
   const timeoutMs = timeoutValue
     ? Number.parseInt(timeoutValue, 10)
     : DEFAULT_TIMEOUT_MS;
@@ -83,33 +88,28 @@ function payloadIsScoped(point, householdId, type, currentEntryId) {
   );
 }
 
-async function verify() {
-  const config = safeConfiguration();
-  if (!config) {
-    skip(
-      "明示的Supabase live modeとQDRANT_URL / QDRANT_API_KEYが揃っていないため外部通信していません。",
-    );
-    return;
-  }
-
-  const client = new QdrantClient({
-    apiKey: config.apiKey,
-    checkCompatibility: true,
-    timeout: config.timeoutMs,
-    url: config.url,
-  });
+export async function verifyQdrantClient(
+  client,
+  config,
+  { logger = console, randomUuid = randomUUID } = {},
+) {
   const operationTimeout = Math.max(1, Math.ceil(config.timeoutMs / 1_000));
-  const householdA = randomUUID();
-  const householdB = randomUUID();
-  const currentEntry = randomUUID();
-  const relatedEntryA = randomUUID();
-  const relatedEntryB = randomUUID();
-  const pointIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  const householdA = randomUuid();
+  const householdB = randomUuid();
+  const currentEntry = randomUuid();
+  const relatedEntryA = randomUuid();
+  const relatedEntryB = randomUuid();
+  const pointIds = [randomUuid(), randomUuid(), randomUuid(), randomUuid()];
   const createdAt = new Date().toISOString();
+  let cleanupRequired = false;
+  let verificationError;
 
   try {
     const collection = await client.collectionExists(config.collection);
     assert(collection.exists, "COLLECTION_NOT_BOOTSTRAPPED");
+    // Once the target collection is known to exist, an upsert can partially
+    // succeed even when its request rejects. Always attempt one cleanup pass.
+    cleanupRequired = true;
 
     await client.upsert(config.collection, {
       points: [
@@ -197,7 +197,7 @@ async function verify() {
       ),
       "HANDOFF_SCOPE_FAILED",
     );
-    pass("Cloud Inferenceによる類似申し送り検索");
+    pass(logger, "Cloud Inferenceによる類似申し送り検索");
 
     const items = await query("needed_item", "トイレットペーパー");
     assert(
@@ -210,23 +210,77 @@ async function verify() {
       ),
       "ITEM_SCOPE_FAILED",
     );
-    pass("必要品重複候補と別世帯filter");
-  } finally {
-    await client
-      .delete(config.collection, {
+    pass(logger, "必要品重複候補と別世帯filter");
+  } catch (error) {
+    verificationError = error;
+  }
+
+  let cleanupError;
+  if (cleanupRequired) {
+    try {
+      await client.delete(config.collection, {
         points: pointIds,
         timeout: operationTimeout,
         wait: true,
-      })
-      .catch(() => undefined);
+      });
+      const residualPoints = await client.retrieve(config.collection, {
+        ids: pointIds,
+        timeout: operationTimeout,
+        with_payload: false,
+        with_vector: false,
+      });
+      assert(Array.isArray(residualPoints), "CLEANUP_READBACK_INVALID");
+      assert(residualPoints.length === 0, "CLEANUP_RESIDUAL_POINTS");
+      pass(logger, "検証pointの削除と0件read-back");
+    } catch (error) {
+      cleanupError = error;
+    }
+  }
+
+  if (cleanupError) {
+    throw new Error(
+      verificationError
+        ? "QDRANT_VERIFICATION_AND_CLEANUP_FAILED"
+        : "QDRANT_CLEANUP_FAILED",
+    );
+  }
+  if (verificationError) throw verificationError;
+}
+
+export async function runQdrantVerifier({
+  Client = QdrantClient,
+  environment = process.env,
+  logger = console,
+  randomUuid = randomUUID,
+} = {}) {
+  try {
+    const config = safeConfiguration(environment);
+    if (!config) {
+      skip(
+        logger,
+        "明示的Supabase live modeとQDRANT_URL / QDRANT_API_KEYが揃っていないため外部通信していません。",
+      );
+      return 0;
+    }
+
+    const client = new Client({
+      apiKey: config.apiKey,
+      checkCompatibility: true,
+      timeout: config.timeoutMs,
+      url: config.url,
+    });
+    await verifyQdrantClient(client, config, { logger, randomUuid });
+    return 0;
+  } catch {
+    logger.error(GENERIC_FAILURE_MESSAGE);
+    return 1;
   }
 }
 
-try {
-  await verify();
-} catch {
-  console.error(
-    "[verify-qdrant] FAIL: 接続、collection、Cloud Inference、または世帯filterを確認してください（詳細・認証情報は非表示）。",
-  );
-  process.exitCode = 1;
+const isDirectExecution =
+  Boolean(process.argv[1]) &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectExecution) {
+  process.exitCode = await runQdrantVerifier();
 }

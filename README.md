@@ -16,7 +16,7 @@ npm run dev
 
 本番相当のローカル起動は`npm run build`の後に`npm run start`です。
 
-資格情報がない既定状態では、外部通信をしない`demo`モードです。写真→音声→合成AI下書き→本人確認→`次の人へ`→別タブ反映→`確認しました`→`私が対応します`→`対応しました`→`購入します`→`購入しました`まで動きます。
+資格情報がない既定状態では、外部通信をしない`demo`モードです。写真→音声→合成AI下書き→本人確認→`次の人へ`→別タブ反映→`見ました`→`私がやります`→`できました`→`買います`→`買いました`まで動きます。
 
 ## demoとliveの分離
 
@@ -25,7 +25,7 @@ npm run dev
 | 合成デモ | `HOMERELAY_DEMO_MODE=true`、`HOMERELAY_DATA_MODE=demo` | 同じブラウザのlocalStorage + BroadcastChannel | 合成下書き・合成関連候補と明記 |
 | Supabase live | `HOMERELAY_DEMO_MODE=false`、`HOMERELAY_DATA_MODE=supabase` | Auth + Postgres + private Storage + Realtime | 設定済みのserver-only adapterだけ利用 |
 
-liveで障害が起きても、暗黙にlocalStorageへ戻って共有成功とは表示しません。
+liveで障害が起きても、暗黙にlocalStorageへ戻って共有成功とは表示しません。OpenAIの有料処理はSupabase liveの招待済みセッションからだけ実行され、失敗時は空の`手入力する`画面へ安全に切り替わります。合成下書きをlive成功として表示しません。
 
 ## HomeRelayローカルSupabase
 
@@ -59,7 +59,7 @@ npm run verify:supabase:local
 npm run verify:supabase:realtime
 ```
 
-続いて、別browser contextを使うlive E2Eを実行できます。下記のパスワードもprocess内だけに保持します。
+続いて、別browser contextを使うSupabase live E2Eを実行できます。下記のパスワードもprocess内だけに保持します。このsuiteは専用の合成下書きをbrowser内で返し、OpenAI、Qdrant、Neo4j、Datadogをprocess側でも無効化するため、vendor課金や外部残存データを発生させません。
 
 ```powershell
 $env:HOMERELAY_DEMO_MODE = "false"
@@ -131,11 +131,11 @@ Supabase Security AdvisorsのWARN 6件は、認証済みユーザーに意図的
 | RPC | 目的 | 世帯・担当境界 |
 |---|---|---|
 | `share_handoff` | 本人確認済み申し送りと必要品を冪等・一括作成 | 世帯IDを入力にせず認証membershipから導出。写真pathも同じ世帯/memberへ固定 |
-| `acknowledge_entry` | 「確認しました」を記録 | entry IDを現在世帯で照合 |
-| `claim_entry` | 「私が対応します」を記録 | entry IDを現在世帯で照合し、未引受だけ更新 |
-| `complete_entry` | 「対応しました」を記録 | 現在世帯かつ引受者本人だけ更新 |
-| `claim_needed_item` | 「購入します」を記録 | item IDを現在世帯で照合し、未引受だけ更新 |
-| `complete_needed_item` | 「購入しました」を記録 | 現在世帯かつ購入担当者本人だけ更新 |
+| `acknowledge_entry` | 「見ました」を記録 | entry IDを現在世帯で照合 |
+| `claim_entry` | 「私がやります」を記録 | entry IDを現在世帯で照合し、未引受だけ更新 |
+| `complete_entry` | 「できました」を記録 | 現在世帯かつ引受者本人だけ更新 |
+| `claim_needed_item` | 「買います」を記録 | item IDを現在世帯で照合し、未引受だけ更新 |
+| `complete_needed_item` | 「買いました」を記録 | 現在世帯かつ購入担当者本人だけ更新 |
 
 6件はすべて`public` schema、固定`search_path=''`、完全修飾した静的SQLで、動的SQLや入力をSQL構文として評価する経路はありません。EXECUTEは`postgres`（owner）、`authenticated`、`service_role`にあり、PUBLIC/anonにはありません。各関数が呼ぶ`private.current_member_id()`と`private.current_household_id()`が`auth.uid() IS NOT NULL`と`members.auth_user_id = auth.uid()`を確認し、対象行も現在世帯で照合します。クラウド試験では別世帯からID指定できる5 RPCをすべて拒否し、`share_handoff`は他世帯IDを受け取れない設計です。service-role/secret keyは一時Node.js検証プロセスだけで使い、browser bundle、`.env.local`、文書、Gitへ公開していません。このため6 WARNは意図した権限昇格境界としてschema変更なしで受容します。
 
@@ -149,7 +149,8 @@ browser-safeな通常設定は`.env.local`、server runtime secretはデプロ�
 |---|---|
 | `HOMERELAY_DEMO_MODE`, `HOMERELAY_DATA_MODE` | demo/liveを明示選択 |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ブラウザで使えるHomeRelay Supabase設定 |
-| `OPENAI_API_KEY` | server-only音声文字起こし・構造化下書き |
+| `OPENAI_API_KEY`, `OPENAI_PROJECT_ID` | server-only音声文字起こし・構造化下書きとHomeRelay専用Project固定 |
+| `HOMERELAY_OPENAI_VERIFY*` | loopback限定・短い合成WAVによる明示opt-in live verifier |
 | `QDRANT_URL`, `QDRANT_API_KEY` | server-only類似申し送り・重複候補検索 |
 | `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD` | server-only関係グラフ |
 | `DD_SITE`, `DD_API_KEY` | 数値のみのDatadog custom metrics |
@@ -177,8 +178,8 @@ HOMERELAY_CLOUD_FOREIGN_FAMILY_EMAIL / HOMERELAY_CLOUD_FOREIGN_FAMILY_PASSWORD
 3. `声で話す`を押し、「昼食は半分ほど。水分を用意しました。トイレットペーパーが少ないです。」と話して停止する。
 4. 下書きを確認・修正し、`これでOK`。この時点では家族タブへ出ない。
 5. `次の人へ`を押し、家族タブへの反映を確認する。
-6. `確認しました`→`私が対応します`→`対応しました`。
-7. `購入します`→`購入しました`。
+6. `見ました`→`私がやります`→`できました`。
+7. `買います`→`買いました`。
 8. `合成候補（Qdrant未接続）`表示を見せ、live結果ではないと説明する。
 
 ### HTTPSスマートフォン + 別PC
@@ -197,7 +198,44 @@ npm run verify:supabase:cloud
 
 2026-08-28の公開前最終検証では、lint、typecheck、cloud集中テスト47/47、全unit 42 files / 308 tests、production build、privacy audit、追加秘密情報検査、`git diff --check`がすべてPASSしました。privacy auditは公開候補160ファイル、到達可能なGit履歴、本番browser配信物37ファイルを検査し、credential pattern、private media、server-secret markerを検出していません。
 
-資格情報がないlive verifierは、安全に`SKIP`して終了コード0を返します。`SKIP`は接続成功の証拠ではありません。live使用済みと記録できるのは、各commandが`PASS`またはvendor受付結果を明示し、`SKIP`がない場合だけです。
+### OpenAI API live検証（2026-08-30）
+
+HomeRelay専用Projectへ`OPENAI_PROJECT_ID`で固定し、個人情報を含まない6.97秒の合成ja-JP WAVだけを使用しました。最初のroute試行は本文やvendor詳細を返さない安全な502で終了し、再試行前にProject表示使用額$0.00と組織残高$18.18を読み戻しました。SDKを`maxRetries=0`、`logLevel=off`、minimal reasoning、出力上限付きへ固定した次の1回で、`gpt-4o-mini-transcribe`の文字起こしと`gpt-5-mini`のstrict構造化下書きがend-to-end PASSしました。
+
+Dashboardの最終集計は3 requests、588 input tokens、419 output tokens（合計1,007 tokens）です。組織残高は$18.18→$18.18、HomeRelay Projectの小数2桁表示使用額は$0.00→$0.00、$1 hard limitは不変でした。2026-08-30の公式単価と最終token内訳による安全側の上限見積もりは$0.0024未満ですが、Dashboardの未丸め実費は表示されないため「厳密に$0」とは記録しません。API key、response body、文字起こし本文、下書き本文はログへ出さず、一時WAVは削除後0件です。
+
+本人確認前に`/api/entries`への保存・共有要求が発生しないphone/desktop E2Eと、API失敗が固定された短い502になり合成成功へ偽装されない集中テストもPASSしています。
+
+通常のOpenAI routeはSupabase liveかつ有効な招待セッションを必須とします。UIは30秒で録音を自動停止し、routeは申告durationが30秒以内かつ実byteが2 MiB以内であることを検証します。音声本体からdurationを独立算出する検証ではないため、server側ではさらにメンバー3回／10分、世帯10回／10分、メンバー1件・世帯2件までの同時実行guardをAPI呼び出し前に適用します。このguardは単一runtime内の防御層であり、Projectの$1 hard limitを置き換えるものではありません。例外のlive verifierは非production、`127.0.0.1:3110`、明示opt-in、32文字以上の一時token、専用headerをすべて満たす場合だけ認証を迂回します。client timeoutはroute上限60秒より長い65秒で、1回のloopback requestだけを送り、昼食・水分・ティッシュの3事実を個別に検証します。
+
+再実行は課金を伴うため、個人情報を含まない短い合成WAVだけで明示的に行います。2つのPowerShellで同じ一時tokenを安全に入力し、終了後に両processから削除してください。tokenと音声pathは`.env.local`へ残しません。
+
+```powershell
+# Terminal A: tokenは32文字以上。入力値は画面へ表示しません。
+$secure = Read-Host "OpenAI verifier one-time token" -AsSecureString
+$env:HOMERELAY_OPENAI_VERIFY_TOKEN = [System.Net.NetworkCredential]::new("", $secure).Password
+$env:HOMERELAY_OPENAI_VERIFY = "true"
+$env:HOMERELAY_DEMO_MODE = "true"
+$env:HOMERELAY_DATA_MODE = "demo"
+npm run dev:openai-verify
+# 検証後にCtrl+Cで停止してから実行します。
+Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY -ErrorAction SilentlyContinue
+```
+
+```powershell
+# Terminal B: Terminal Aと同じtokenと、短い合成WAVの絶対pathを入力します。
+$secure = Read-Host "OpenAI verifier one-time token" -AsSecureString
+$env:HOMERELAY_OPENAI_VERIFY_TOKEN = [System.Net.NetworkCredential]::new("", $secure).Password
+$env:HOMERELAY_OPENAI_VERIFY = "true"
+$env:HOMERELAY_OPENAI_VERIFY_AUDIO = Read-Host "Synthetic WAV absolute path"
+$env:HOMERELAY_OPENAI_VERIFY_URL = "http://127.0.0.1:3110"
+npm run verify:openai
+Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY_AUDIO, Env:HOMERELAY_OPENAI_VERIFY_URL, Env:HOMERELAY_OPENAI_VERIFY -ErrorAction SilentlyContinue
+```
+
+`verify:openai`は、明示opt-in・合成WAV・一時tokenがなければ外部通信せず終了コード1で失敗します。Qdrant、Neo4j、Datadogの資格情報なしverifierは安全に`SKIP`して終了コード0を返します。どちらもlive接続成功の証拠ではなく、`PASS`またはvendor受付結果を読み戻せた場合だけ使用済みと記録します。
+
+同日の更新後検証は、lint、typecheck、46 files / 347 unit tests、14 synthetic E2E（Supabase live-only 2件は意図的skip）、production build、privacy audit、秘密情報検査、production dependency脆弱性0件、`git diff --check`がPASSしました。デモ導線は`見ました`→`私がやります`→`できました`→`買います`→`買いました`までphone 2回・desktop 2回の計4回を連続実行し、AI失敗→空の手入力→本人確認→明示共有もphone/desktopでPASSしました。
 
 ローカルSupabaseを起動した状態では、pgTAP、Auth/Data/Storage/RLS、Realtimeを追加確認します。
 
@@ -217,7 +255,7 @@ loopback検証に必要な`HOMERELAY_TEST_*`と`HOMERELAY_E2E_*`は、[HomeRelay
 
 - OpenAI Codex: 要件整理、実装、検証に使用済み。
 - Supabase: 専用ローカル環境に加え、HomeRelayクラウド`czfmqaeqamepntpsakbv`（東京）へ実接続済み。招待制で一般signup無効、メール確認必須を維持。管理者invite-linkの生成・消費、RLS 5表、非公開Storage、Realtime 3表、同世帯5操作の正例、別世帯拒否、厳格cleanupを確認し、試験後はAuth 0・全public表0行・Storage 0。Security WARN 6は上記安全設計として受容、Performance INFO 6は将来のquery plan確認事項。
-- OpenAI API: server-only adapterとschema検証を実装済み。資格情報未提供でlive未接続、専用live verifierは未実装です。live処理失敗時は合成結果へ偽装せず安全なエラーを返します。
+- OpenAI API: **HomeRelay専用Projectへ実接続済み・live検証PASS**。server-onlyで`gpt-4o-mini-transcribe`による合成音声文字起こしと`gpt-5-mini`によるstrict構造化下書きを確認しました。本人確認前は保存・共有せず、失敗時は安全な502を返して合成結果へ偽装しません。
 - Qdrant、Neo4j、Datadog: server-only adapter、非blockingまたは明示的な利用不能状態、live verifierを実装済み。資格情報未提供のためlive未接続。
 - CodeRabbit: `.coderabbit.yaml`を実装済み。GitHub App/PRレビュー未実施なので使用済みとは扱わない。
 - HackerSquad: 認証済みの当日環境を確認できず未接続。

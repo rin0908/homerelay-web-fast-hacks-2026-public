@@ -71,7 +71,7 @@ const credentialPatterns = [
   {
     label: "server credential assignment",
     pattern:
-      /(?:DD_API_KEY|DD_APP_KEY|NEO4J_PASSWORD|OPENAI_API_KEY|QDRANT_API_KEY|SUPABASE_ACCESS_TOKEN|SUPABASE_DB_PASSWORD|SUPABASE_SECRET_KEY|SUPABASE_SERVICE_ROLE_KEY)[ \t]*[=:][ \t]*["']?(?!(?:example|placeholder|synthetic|test)-)[A-Za-z0-9+/_=-]{12,}/,
+      /(?:DD_API_KEY|DD_APP_KEY|HOMERELAY_OPENAI_VERIFY_TOKEN|NEO4J_PASSWORD|OPENAI_API_KEY|QDRANT_API_KEY|SUPABASE_ACCESS_TOKEN|SUPABASE_DB_PASSWORD|SUPABASE_SECRET_KEY|SUPABASE_SERVICE_ROLE_KEY)[ \t]*[=:][ \t]*["']?(?!(?:example|placeholder|synthetic|test)-)[A-Za-z0-9+/_=-]{12,}/,
   },
   {
     label: "package registry token",
@@ -219,6 +219,7 @@ const serverOnlyMarkers = [
   "DD_APP_KEY",
   "GH_TOKEN",
   "GITHUB_TOKEN",
+  "HOMERELAY_OPENAI_VERIFY_TOKEN",
   "NEO4J_PASSWORD",
   "OPENAI_API_KEY",
   "QDRANT_API_KEY",
