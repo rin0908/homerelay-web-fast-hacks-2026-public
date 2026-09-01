@@ -48,7 +48,7 @@ export default async function HomePage() {
 
   return (
     <AuthSessionBoundary mode={mode}>
-    <main className="mx-auto min-h-screen w-full max-w-7xl px-5 py-5 sm:px-8 sm:py-7 lg:px-10">
+    <main className="mx-auto min-h-screen w-full max-w-7xl px-5 pb-[calc(env(safe-area-inset-bottom)+6.5rem)] pt-5 sm:px-8 sm:pt-7 lg:px-10 lg:pb-7">
       {mode === "demo" ? <DemoModeBanner /> : null}
       <IphoneInstallHint />
 
@@ -104,7 +104,7 @@ export default async function HomePage() {
           mode={mode}
         />
 
-        <aside className="soft-card p-5 lg:sticky lg:top-6 lg:p-6" aria-labelledby="record-cta-title">
+        <aside className="soft-card hidden p-5 lg:sticky lg:top-6 lg:block lg:p-6" aria-labelledby="record-cta-title">
           <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#edf4f1] text-[var(--color-primary)]">
             <Camera aria-hidden="true" size={25} />
           </span>

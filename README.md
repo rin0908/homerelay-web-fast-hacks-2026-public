@@ -241,9 +241,11 @@ Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY_AUDIO
 
 通常のSafariでURLバーが見える問題に対し、standalone manifest、Apple Web App metadata、HomeRelay専用アイコン、ホーム画面追加案内を実装しました。ホームの`カメラを開く`から背面カメラを一度だけ自動起動するため、記録画面で同じ開始ボタンをもう一度押す必要はありません。シャッター、撮り直し、`この写真を使う`、音声開始、本人確認は意図しない撮影・録音・共有を防ぐため維持します。
 
+スマートフォンのホームには、履歴件数やスクロール位置に関係なく使える`新しく伝える`固定CTAを安全領域の上へ表示します。PCでは従来どおり右側の入力カードを表示し、固定CTAは表示しません。カメラ／マイクの許可はiOSが端末・Webアプリ単位で求める初回の安全確認であり、自動承認せず利用者本人が選択します。
+
 対応・購入の5操作は、タップ時に短い状態表示とともに即時反映し、認証付きのguarded RPCを順序どおり一括送信します。送信中のRealtime表示は保留してSupabase正本を最後に読み戻し、失敗時は楽観表示を戻して警告します。別batchも直列送信し、画面離脱時はpending actionを`keepalive`でflushします。Neo4j派生graphには`買います`と`買いました`の両イベントを残し、アクセス権限は引き続きSupabaseだけで判定します。
 
-このcheckpointではlint、typecheck、56 files / 433 unit tests、16 synthetic E2E（live-only 2件は意図的skip）、Next.js 16.3.3 production build、privacy audit、production dependency audit、`git diff --check`がPASSしました。privacy auditは190公開候補ファイル、到達可能Git履歴、41 browser配信ファイルを検査し、private media、credential pattern、runtime content log、server-secret markerを検出していません。新しいstandalone起動と即時操作は自動検証済みで、更新後Previewに対するiPhone＋Windowsの物理再試験が次のgateです。
+このcheckpointではlint、typecheck、56 files / 434 unit tests、16 synthetic E2E（live-only 2件は意図的skip）、Next.js 16.3.3 production build、privacy audit、production dependency audit、`git diff --check`がPASSしました。privacy auditは190公開候補ファイル、到達可能Git履歴、41 browser配信ファイルを検査し、private media、credential pattern、runtime content log、server-secret markerを検出していません。新しいstandalone起動と即時操作は自動検証済みで、更新後Previewに対するiPhone＋Windowsの物理再試験が次のgateです。
 
 ### Qdrant / Neo4j live検証（2026-08-30）
 

@@ -88,7 +88,12 @@ describe("RelayHomeFeed optimistic actions", () => {
     const user = userEvent.setup();
 
     render(<RelayHomeFeed context={DEMO_FAMILY_CONTEXT} mode="supabase" />);
-    await screen.findByText(initial.conditionSummary);
+    const conditionSummary = await screen.findByText(initial.conditionSummary);
+    const mobileRecordCta = screen.getByTestId("mobile-record-cta");
+    expect(
+      mobileRecordCta.compareDocumentPosition(conditionSummary) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "見ました" }));
     await user.click(screen.getByRole("button", { name: "私がやります" }));
@@ -151,5 +156,28 @@ describe("RelayHomeFeed optimistic actions", () => {
       ),
     );
     expect(await screen.findByText(/更新できませんでした/)).toBeVisible();
+  });
+
+  it("shows only the empty-state capture link when no handoff exists", async () => {
+    const relay = {
+      acknowledge: vi.fn(),
+      claimEntry: vi.fn(),
+      claimItem: vi.fn(),
+      completeEntry: vi.fn(),
+      completeItem: vi.fn(),
+      list: vi.fn().mockResolvedValue([]),
+      mode: "supabase",
+      publish: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+    } satisfies HandoffRelay;
+    mocks.createSupabaseRelay.mockReturnValue(relay);
+
+    render(<RelayHomeFeed context={DEMO_FAMILY_CONTEXT} mode="supabase" />);
+
+    await screen.findByRole("heading", {
+      name: "最初の申し送りを始めましょう",
+    });
+    expect(screen.getAllByRole("link", { name: "カメラを開く" })).toHaveLength(1);
+    expect(screen.queryByTestId("mobile-record-cta")).not.toBeInTheDocument();
   });
 });

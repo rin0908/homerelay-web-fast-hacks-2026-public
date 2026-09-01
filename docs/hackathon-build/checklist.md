@@ -24,7 +24,7 @@
   Verify: Lint/typecheck plus visual check at approximately 390px and 1280px widths.
 
 - [ ] **3. Implement in-page camera capture — Partial**
-  Current status: HTTPS Previewで実iPhoneの背面カメラ撮影と許可は確認済みです。通常SafariのURLバーを避けるstandalone PWA metadataとホーム画面追加案内、`カメラを開く`から一度だけ自動開始する導線も実装し、Strict Mode、permission error、phone/desktop E2Eを通過しました。更新後Previewでのstandalone物理再確認だけが残ります。
+  Current status: HTTPS Previewで実iPhoneの背面カメラ撮影と許可を確認し、更新後Previewでもホーム画面版から一度の操作でカメラが開く物理確認に合格しました。通常SafariのURLバーを避けるstandalone PWA metadataとホーム画面追加案内、履歴をスクロールせず使えるモバイル固定CTA、`カメラを開く`から一度だけ自動開始する導線を実装し、Strict Mode、permission error、phone/desktop E2Eを通過しました。音声以降を含む更新後Previewの物理回帰が残ります。
   Spec ref: `spec.md > Camera And Audio`; `prd.md > Epic 1`
   What to build: Rear-camera preview, capture, retake, accept, cleanup, image re-encoding/compression, and fallback only when needed.
   Acceptance: On HTTPS phone, user can capture without selecting a saved photo; tracks stop and temporary images are discarded on retake/cancel.

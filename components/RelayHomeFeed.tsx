@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { HomeFeed, type HomeFeedStatus } from "@/components/HomeFeed";
+import { ArrowRight, Camera } from "@/components/Icons";
 import { RelatedHandoffsPanel } from "@/components/RelatedHandoffsPanel";
 import { createDemoRelay } from "@/lib/relay/demo";
 import {
@@ -206,6 +208,18 @@ export function RelayHomeFeed({
         >
           タップを受け付けました。安全に反映しています…
         </p>
+      ) : null}
+      {entries.length > 0 ? (
+        <Link
+          aria-label="新しく伝える（カメラを開く）"
+          className="primary-button fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-30 justify-center shadow-[0_14px_35px_rgb(52_91_82_/_0.28)] lg:!hidden"
+          data-testid="mobile-record-cta"
+          href="/record?camera=1"
+        >
+          <Camera aria-hidden="true" size={22} />
+          新しく伝える
+          <ArrowRight aria-hidden="true" size={19} />
+        </Link>
       ) : null}
       <HomeFeed
         afterFirstEntry={
