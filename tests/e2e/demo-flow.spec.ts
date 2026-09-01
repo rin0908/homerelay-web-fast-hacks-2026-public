@@ -41,7 +41,10 @@ test("写真と声の申し送りを家族へ共有し、購入完了まで引�
   await expect(recordPage.getByAltText("撮影した写真の確認")).toBeVisible();
   await recordPage.getByRole("button", { name: "この写真を使う" }).click();
 
-  await recordPage.getByRole("button", { name: "声で話す" }).click();
+  await expect(recordPage.locator('[data-stage="voice"]')).toBeFocused();
+  const startRecording = recordPage.getByRole("button", { name: "声で話す" });
+  await expect(startRecording).toBeInViewport();
+  await startRecording.click();
   await expect(recordPage.getByText(/録音中/)).toBeVisible();
   await recordPage.waitForTimeout(700);
   await recordPage.getByRole("button", { name: "録音を停止" }).click();
@@ -49,13 +52,19 @@ test("写真と声の申し送りを家族へ共有し、購入完了まで引�
   await expect(
     recordPage.getByRole("heading", { name: "AI下書きを確認" }),
   ).toBeVisible({ timeout: 15_000 });
+  await expect(recordPage.locator('[data-stage="confirm"]')).toBeFocused();
   await recordPage.getByRole("textbox", { name: "今日の様子" }).fill(editedCondition);
   await recordPage.getByRole("textbox", { name: "必要なもの" }).fill(neededItem);
-  await recordPage.getByRole("button", { name: "これでOK" }).click();
+  const confirm = recordPage.getByRole("button", { name: "これでOK" });
+  await expect(confirm).toBeInViewport();
+  await confirm.click();
 
   await expect(recordPage.getByRole("heading", { name: "共有する内容が整いました" })).toBeVisible();
+  await expect(recordPage.locator('[data-stage="share"]')).toBeFocused();
   await expect(recordPage.getByText(editedCondition)).toBeVisible();
-  await recordPage.getByRole("button", { name: "次の人へ" }).click();
+  const share = recordPage.getByRole("button", { name: "次の人へ" });
+  await expect(share).toBeInViewport();
+  await share.click();
   await expect(recordPage.getByRole("heading", { name: "家族画面へ共有しました" })).toBeVisible();
 
   const sharedEntry = familyPage.locator("article").filter({ hasText: editedCondition }).first();

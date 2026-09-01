@@ -37,7 +37,7 @@ export function EntryCard({
 }: EntryCardProps) {
   return (
     <article className="soft-card overflow-hidden">
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#eef1ec] sm:aspect-[16/10]">
+      <div className="relative aspect-[4/3] w-full overflow-hidden bg-[#eef1ec] sm:aspect-[16/10] lg:h-64 lg:aspect-auto">
         <img
           alt={entry.photoAlt}
           className="h-full w-full object-cover"
@@ -66,7 +66,7 @@ export function EntryCard({
           </time>
         </header>
 
-        <div className="mt-6 grid gap-5 sm:grid-cols-2">
+        <div className="mt-6 grid gap-5 border-t border-[var(--color-divider)] pt-5 sm:grid-cols-2">
           <section>
             <p className="text-xs font-semibold tracking-[0.08em] text-[var(--color-primary)]">今日のご様子</p>
             <p className="mt-2 text-[var(--color-heading)]">{entry.conditionSummary}</p>
@@ -81,27 +81,7 @@ export function EntryCard({
           </section>
         </div>
 
-        {entry.neededItems.length > 0 ? (
-          <section className="mt-7 border-t border-[var(--color-divider)] pt-6" aria-labelledby={`needed-${entry.id}`}>
-            <h3 className="text-xl font-semibold text-[var(--color-heading)]" id={`needed-${entry.id}`}>
-              必要なもの
-            </h3>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {entry.neededItems.map((item) => (
-                <NeededItemCard
-                  busy={busy}
-                  currentMemberId={currentMemberId}
-                  item={item}
-                  key={item.id}
-                  onClaim={onClaimItem}
-                  onComplete={onCompleteItem}
-                />
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section className="mt-7 border-t border-[var(--color-divider)] pt-6" aria-label="申し送りへの対応">
+        <section className="mt-6 border-t border-[var(--color-divider)] pt-5" aria-label="申し送りへの対応">
           {entry.actionBy ? (
             <p className="mb-3 flex items-center gap-1.5 text-sm text-[var(--color-secondary)]">
               <UserRound aria-hidden="true" size={16} />
@@ -141,6 +121,27 @@ export function EntryCard({
             })}
           </div>
         </section>
+
+        {entry.neededItems.length > 0 ? (
+          <section className="mt-6 border-t border-[var(--color-divider)] pt-5" aria-labelledby={`needed-${entry.id}`}>
+            <h3 className="text-xl font-semibold text-[var(--color-heading)]" id={`needed-${entry.id}`}>
+              必要なもの
+            </h3>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              {entry.neededItems.map((item) => (
+                <NeededItemCard
+                  busy={busy}
+                  currentMemberId={currentMemberId}
+                  item={item}
+                  key={item.id}
+                  onClaim={onClaimItem}
+                  onComplete={onCompleteItem}
+                />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
       </div>
     </article>
   );

@@ -90,14 +90,24 @@ export async function verifyOpenAI({
   );
   formData.set("durationMs", "6970");
 
-  const response = await fetchImpl(endpoint, {
-    body: formData,
-    cache: "no-store",
-    headers: { [VERIFY_HEADER]: verificationToken },
-    method: "POST",
-    redirect: "error",
-    signal: abortSignalFactory(VERIFY_TIMEOUT_MS),
-  });
+  let response;
+  try {
+    response = await fetchImpl(endpoint, {
+      body: formData,
+      cache: "no-store",
+      headers: { [VERIFY_HEADER]: verificationToken },
+      method: "POST",
+      redirect: "error",
+      signal: abortSignalFactory(VERIFY_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const name = error instanceof Error ? error.name : "";
+    throw new Error(
+      name === "AbortError" || name === "TimeoutError"
+        ? "VERIFY_TIMEOUT"
+        : "VERIFY_TRANSPORT_FAILED",
+    );
+  }
 
   if (response.status !== 200) {
     const safeClass = response.headers.get("x-homerelay-ai-error-class");
@@ -115,7 +125,16 @@ export async function verifyOpenAI({
   }
   assert(response.headers.get("cache-control") === "no-store", "CACHE_POLICY_INVALID");
 
-  const result = DraftResultSchema.parse(await response.json());
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("DRAFT_RESPONSE_JSON_INVALID");
+  }
+
+  const parsed = DraftResultSchema.safeParse(payload);
+  assert(parsed.success, "DRAFT_RESPONSE_SCHEMA_INVALID");
+  const result = parsed.data;
   const narrative = [
     result.draft.conditionSummary,
     result.draft.completedSummary,

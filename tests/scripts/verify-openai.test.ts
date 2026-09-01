@@ -153,6 +153,44 @@ describe("OpenAI live verifier", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("classifies invalid success JSON without printing its body", async () => {
+    await expect(
+      verifier.verifyOpenAI({
+        ...fileDependencies(),
+        environment: environment(),
+        fetchImpl: vi.fn().mockResolvedValue(
+          new Response("not-json", {
+            headers: { "Cache-Control": "no-store" },
+            status: 200,
+          }),
+        ),
+      }),
+    ).rejects.toThrow("DRAFT_RESPONSE_JSON_INVALID");
+  });
+
+  it.each([
+    ["timeout", Object.assign(new Error("secret timeout detail"), { name: "TimeoutError" }), "VERIFY_TIMEOUT"],
+    ["transport", new Error("secret transport detail"), "VERIFY_TRANSPORT_FAILED"],
+  ])("classifies a %s failure without exposing the vendor detail", async (_label, failure, code) => {
+    await expect(
+      verifier.verifyOpenAI({
+        ...fileDependencies(),
+        environment: environment(),
+        fetchImpl: vi.fn().mockRejectedValue(failure),
+      }),
+    ).rejects.toThrow(code);
+  });
+
+  it("classifies an invalid success schema without exposing fields", async () => {
+    await expect(
+      verifier.verifyOpenAI({
+        ...fileDependencies(),
+        environment: environment(),
+        fetchImpl: vi.fn().mockResolvedValue(response({ mode: "live" })),
+      }),
+    ).rejects.toThrow("DRAFT_RESPONSE_SCHEMA_INVALID");
+  });
+
   it("prints only a fixed safe failure without reading a vendor body", async () => {
     const secret = "OPENAI_SECRET_MUST_NOT_APPEAR";
     const bodyReader = vi.fn().mockResolvedValue({ detail: secret });

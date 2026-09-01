@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Fragment, type ReactNode } from "react";
 import { AlertTriangle, Camera, HeartHandshake, RotateCcw } from "@/components/Icons";
 import { EntryCard } from "@/components/EntryCard";
 import type { HandoffEntry } from "@/types/handoff";
@@ -17,6 +18,7 @@ export type HomeFeedProps = {
   onCompleteItem?: (entryId: string, itemId: string) => void;
   busy?: boolean;
   currentMemberId?: string;
+  afterFirstEntry?: ReactNode;
 };
 
 export function HomeFeed({
@@ -29,6 +31,7 @@ export function HomeFeed({
   onCompleteItem,
   busy = false,
   currentMemberId,
+  afterFirstEntry,
 }: HomeFeedProps) {
   if (status === "loading") {
     return (
@@ -75,16 +78,18 @@ export function HomeFeed({
   return (
     <div className="space-y-6">
       {entries.map((entry, index) => (
-        <EntryCard
-          busy={busy}
-          currentMemberId={currentMemberId}
-          entry={entry}
-          key={entry.id}
-          onAcknowledge={onAcknowledge}
-          onClaimItem={onClaimItem ? (itemId) => onClaimItem(entry.id, itemId) : undefined}
-          onCompleteItem={onCompleteItem ? (itemId) => onCompleteItem(entry.id, itemId) : undefined}
-          priority={index === 0}
-        />
+        <Fragment key={entry.id}>
+          <EntryCard
+            busy={busy}
+            currentMemberId={currentMemberId}
+            entry={entry}
+            onAcknowledge={onAcknowledge}
+            onClaimItem={onClaimItem ? (itemId) => onClaimItem(entry.id, itemId) : undefined}
+            onCompleteItem={onCompleteItem ? (itemId) => onCompleteItem(entry.id, itemId) : undefined}
+            priority={index === 0}
+          />
+          {index === 0 ? afterFirstEntry : null}
+        </Fragment>
       ))}
     </div>
   );

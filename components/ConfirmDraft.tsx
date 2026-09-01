@@ -47,7 +47,7 @@ export function ConfirmDraft({ result, onConfirmed, onRecordAgain }: ConfirmDraf
   }
 
   return (
-    <section className="soft-card p-5 sm:p-8" aria-labelledby="draft-title">
+    <section className="soft-card p-5 pb-28 sm:p-8" aria-labelledby="draft-title">
       <div className="flex items-start gap-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#f1ecf8] text-[#725c87]">
           <Sparkles aria-hidden="true" size={24} />
@@ -69,11 +69,11 @@ export function ConfirmDraft({ result, onConfirmed, onRecordAgain }: ConfirmDraf
             : "AIの下書きを使わず手入力します。確認するまで共有されません。"}
       </p>
 
-      <form className="mt-5 space-y-5" onSubmit={submit}>
+      <form className="mt-4 space-y-3 sm:mt-5 sm:space-y-5" onSubmit={submit}>
         <label className="block font-semibold text-[var(--color-heading)]">
           今日の様子
           <textarea
-            className="mt-2 min-h-24 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 py-3 font-normal text-[var(--color-body)]"
+            className="mt-2 min-h-16 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 py-2 font-normal text-[var(--color-body)] sm:min-h-24 sm:py-3"
             maxLength={160}
             onChange={(event) => setConditionSummary(event.target.value)}
             required
@@ -83,7 +83,7 @@ export function ConfirmDraft({ result, onConfirmed, onRecordAgain }: ConfirmDraf
         <label className="block font-semibold text-[var(--color-heading)]">
           今日できたこと
           <textarea
-            className="mt-2 min-h-20 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 py-3 font-normal text-[var(--color-body)]"
+            className="mt-2 min-h-16 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 py-2 font-normal text-[var(--color-body)] sm:min-h-20 sm:py-3"
             maxLength={160}
             onChange={(event) => setCompletedSummary(event.target.value)}
             value={completedSummary}
@@ -92,7 +92,7 @@ export function ConfirmDraft({ result, onConfirmed, onRecordAgain }: ConfirmDraf
         <label className="block font-semibold text-[var(--color-heading)]">
           次の方へのお願い
           <textarea
-            className="mt-2 min-h-20 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 py-3 font-normal text-[var(--color-body)]"
+            className="mt-2 min-h-16 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 py-2 font-normal text-[var(--color-body)] sm:min-h-20 sm:py-3"
             maxLength={160}
             onChange={(event) => setNextRequest(event.target.value)}
             value={nextRequest}
@@ -101,7 +101,7 @@ export function ConfirmDraft({ result, onConfirmed, onRecordAgain }: ConfirmDraf
         <label className="block font-semibold text-[var(--color-heading)]">
           必要なもの
           <textarea
-            className="mt-2 min-h-20 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 py-3 font-normal text-[var(--color-body)]"
+            className="mt-2 min-h-16 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 py-2 font-normal text-[var(--color-body)] sm:min-h-20 sm:py-3"
             maxLength={260}
             onChange={(event) => setNeededItems(event.target.value)}
             placeholder="1行に1つ"
@@ -116,7 +116,7 @@ export function ConfirmDraft({ result, onConfirmed, onRecordAgain }: ConfirmDraf
           </p>
         ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-30 grid grid-cols-2 gap-2 rounded-2xl bg-[#fffdf9f2] p-2 shadow-xl backdrop-blur sm:static sm:grid-cols-2 sm:gap-3 sm:bg-transparent sm:p-0 sm:shadow-none">
           <button className="secondary-button" onClick={onRecordAgain} type="button">
             <Mic aria-hidden="true" size={20} />
             もう一度話す

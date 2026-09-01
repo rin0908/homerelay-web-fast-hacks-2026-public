@@ -11,6 +11,9 @@ const fakeCameraFile = path.resolve(
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Live Preview verification has its own opt-in config so ordinary local
+  // E2E runs never discover a test that can contact cloud services.
+  testIgnore: "hosted-flow.spec.ts",
   globalTeardown: "./scripts/playwright-global-teardown.mjs",
   expect: {
     timeout: liveE2e ? 15_000 : 5_000,

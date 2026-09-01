@@ -5,6 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { HomeFeed, type HomeFeedStatus } from "@/components/HomeFeed";
 import { RelatedHandoffsPanel } from "@/components/RelatedHandoffsPanel";
 import { createDemoRelay } from "@/lib/relay/demo";
+import {
+  applyConfirmedEntryAction,
+  applyConfirmedItemAction,
+} from "@/lib/relay/confirmed-transitions";
 import { createSupabaseRelay } from "@/lib/relay/supabase";
 import type {
   HandoffRelay,
@@ -89,21 +93,19 @@ export function RelayHomeFeed({
     };
   }, [fixtureEntries, mode, relay]);
 
-  async function refreshAfter(action: () => Promise<void>) {
+  async function applyAfter(
+    action: () => Promise<void>,
+    applyConfirmed: (current: HandoffEntry[]) => HandoffEntry[],
+  ) {
     if (!relay || busy) return;
     setBusy(true);
     setErrorMessage(null);
-    const generation = ++requestGeneration.current;
     try {
       await action();
-      const next = await relay.list();
-      const normalized =
-        mode === "demo" ? mergeFixtures(next, fixtureEntries) : next;
-      if (generation === requestGeneration.current) {
-        entriesRef.current = normalized;
-        setEntries(normalized);
-        setStatus(normalized.length > 0 ? "ready" : "empty");
-      }
+      const next = applyConfirmed(entriesRef.current);
+      entriesRef.current = next;
+      setEntries(next);
+      setStatus(next.length > 0 ? "ready" : "empty");
     } catch {
       setErrorMessage("更新できませんでした。表示内容を保ったまま、もう一度お試しください。");
     } finally {
@@ -119,7 +121,9 @@ export function RelayHomeFeed({
         : action === "claimed"
           ? () => relay.claimEntry(entryId)
           : () => relay.completeEntry(entryId);
-    void refreshAfter(operation);
+    void applyAfter(operation, (current) =>
+      applyConfirmedEntryAction(current, entryId, action, context.member),
+    );
   }
 
   return (
@@ -137,22 +141,46 @@ export function RelayHomeFeed({
           {errorMessage}
         </p>
       ) : null}
-      {entries.length > 0 ? (
-        <div className="mb-6">
-          <RelatedHandoffsPanel entry={entries[0]} mode={mode} />
-        </div>
-      ) : null}
       <HomeFeed
+        afterFirstEntry={
+          entries.length > 0 ? (
+            <RelatedHandoffsPanel entry={entries[0]} mode={mode} />
+          ) : null
+        }
         busy={busy}
         currentMemberId={context.member.id}
         entries={entries}
         errorMessage={errorMessage ?? undefined}
         onAcknowledge={acknowledge}
         onClaimItem={(_entryId, itemId) => {
-          if (relay) void refreshAfter(() => relay.claimItem(itemId));
+          if (relay) {
+            void applyAfter(
+              () => relay.claimItem(itemId),
+              (current) =>
+                applyConfirmedItemAction(
+                  current,
+                  itemId,
+                  "purchase_intent",
+                  context.member,
+                  new Date().toISOString(),
+                ),
+            );
+          }
         }}
         onCompleteItem={(_entryId, itemId) => {
-          if (relay) void refreshAfter(() => relay.completeItem(itemId));
+          if (relay) {
+            void applyAfter(
+              () => relay.completeItem(itemId),
+              (current) =>
+                applyConfirmedItemAction(
+                  current,
+                  itemId,
+                  "purchased",
+                  context.member,
+                  new Date().toISOString(),
+                ),
+            );
+          }
         }}
         status={
           relay

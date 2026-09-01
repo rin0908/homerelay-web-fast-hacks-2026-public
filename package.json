@@ -18,6 +18,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:live": "playwright test tests/e2e/live-flow.spec.ts --project=desktop-1280",
+    "test:e2e:hosted": "node --env-file-if-exists=.env.local node_modules/@playwright/test/cli.js test --config=playwright.hosted.config.ts",
     "verify:openai": "node scripts/verify-openai.mjs",
     "qdrant:bootstrap": "node --env-file-if-exists=.env.local scripts/bootstrap-qdrant.mjs",
     "verify:qdrant": "node --env-file-if-exists=.env.local scripts/verify-qdrant.mjs",
@@ -29,6 +30,9 @@
     "verify:supabase:local": "node scripts/verify-local-supabase.mjs",
     "verify:supabase:realtime": "node scripts/verify-local-realtime.mjs",
     "verify:supabase:cloud": "node scripts/verify-cloud-supabase.mjs",
+    "fixture:hosted:provision": "node --env-file-if-exists=.env.local scripts/manage-hosted-demo-fixture.mjs provision",
+    "fixture:hosted:snapshot": "node --env-file-if-exists=.env.local scripts/manage-hosted-demo-fixture.mjs snapshot",
+    "fixture:hosted:cleanup": "node --env-file-if-exists=.env.local scripts/manage-hosted-demo-fixture.mjs cleanup",
     "verify": "npm run lint && npm run typecheck && npm run test:run && npm run build",
     "verify:release": "npm run lint && npm run typecheck && npm run test:run && npm run test:e2e && npm run build && npm run audit:privacy"
   },
