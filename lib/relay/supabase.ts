@@ -42,6 +42,8 @@ const ENTRY_SELECT = `
 const DEFAULT_PHOTO_BUCKET = "handoff-photos";
 const DEFAULT_SIGNED_URL_SECONDS = 300;
 const DEFAULT_DEBOUNCE_MS = 120;
+const DEFAULT_ACTION_BATCH_MS = 650;
+const MAX_ACTION_BATCH_SIZE = 10;
 const LIST_LIMIT = 10;
 const PRIVATE_PHOTO_PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 3'%3E%3Crect width='4' height='3' fill='%23eef1ec'/%3E%3C/svg%3E";
@@ -68,11 +70,26 @@ export type SupabaseRelayContext = {
 };
 
 export type SupabaseRelayOptions = {
+  actionBatchMs?: number;
   fetch?: RelayFetch;
   photoBucket?: string;
   signedUrlSeconds?: number;
   debounceMs?: number;
   onSubscriptionError?: (error: SupabaseRelayError) => void;
+};
+
+type GuardedActionName =
+  | "acknowledge_entry"
+  | "claim_entry"
+  | "complete_entry"
+  | "claim_needed_item"
+  | "complete_needed_item";
+
+type PendingGuardedAction = {
+  action: GuardedActionName;
+  reject: (error: SupabaseRelayError) => void;
+  resolve: () => void;
+  targetId: string;
 };
 
 export type SupabaseRelayErrorCode =
@@ -152,7 +169,11 @@ export class SupabaseRelay implements HandoffRelay {
   readonly #photoBucket: string;
   readonly #signedUrlSeconds: number;
   readonly #debounceMs: number;
+  readonly #actionBatchMs: number;
   readonly #onSubscriptionError?: (error: SupabaseRelayError) => void;
+  #actionBatchTimer: ReturnType<typeof setTimeout> | null = null;
+  #actionFlushChain: Promise<void> = Promise.resolve();
+  #pendingActions: PendingGuardedAction[] = [];
 
   constructor(
     client: SupabaseClient,
@@ -168,6 +189,7 @@ export class SupabaseRelay implements HandoffRelay {
     this.#signedUrlSeconds =
       options.signedUrlSeconds ?? DEFAULT_SIGNED_URL_SECONDS;
     this.#debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.#actionBatchMs = options.actionBatchMs ?? DEFAULT_ACTION_BATCH_MS;
     this.#onSubscriptionError = options.onSubscriptionError;
   }
 
@@ -296,10 +318,24 @@ export class SupabaseRelay implements HandoffRelay {
         }
       });
 
+    const flushPendingActions = () => {
+      if (this.#pendingActions.length === 0) return;
+      if (this.#actionBatchTimer) clearTimeout(this.#actionBatchTimer);
+      this.#actionBatchTimer = null;
+      void this.#flushGuardedActions();
+    };
+    const flushWhenHidden = () => {
+      if (document.visibilityState === "hidden") flushPendingActions();
+    };
+    window.addEventListener("pagehide", flushPendingActions);
+    document.addEventListener("visibilitychange", flushWhenHidden);
+
     return () => {
       active = false;
       if (timeout) clearTimeout(timeout);
       clearInterval(signedUrlRefresh);
+      window.removeEventListener("pagehide", flushPendingActions);
+      document.removeEventListener("visibilitychange", flushWhenHidden);
       void this.#client.removeChannel(channel as RealtimeChannel);
     };
   }
@@ -325,24 +361,57 @@ export class SupabaseRelay implements HandoffRelay {
   }
 
   async #guardedAction(
-    name:
-      | "acknowledge_entry"
-      | "claim_entry"
-      | "complete_entry"
-      | "claim_needed_item"
-      | "complete_needed_item",
+    name: GuardedActionName,
     targetId: string,
   ): Promise<void> {
-    try {
-      const response = await this.#fetch("/api/actions", {
-        body: JSON.stringify({ action: name, targetId }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      });
-      if (!response.ok) return fail("ACTION_FAILED");
-    } catch (error) {
-      if (error instanceof SupabaseRelayError) throw error;
-      return fail("ACTION_FAILED");
+    return new Promise<void>((resolve, reject) => {
+      this.#pendingActions.push({ action: name, reject, resolve, targetId });
+      if (this.#actionBatchTimer) clearTimeout(this.#actionBatchTimer);
+      const flushImmediately =
+        name === "complete_needed_item" ||
+        this.#pendingActions.length >= MAX_ACTION_BATCH_SIZE;
+      this.#actionBatchTimer = setTimeout(
+        () => void this.#flushGuardedActions(),
+        flushImmediately ? 0 : this.#actionBatchMs,
+      );
+    });
+  }
+
+  async #flushGuardedActions(): Promise<void> {
+    this.#actionBatchTimer = null;
+    const pending = this.#pendingActions.splice(0, MAX_ACTION_BATCH_SIZE);
+    if (pending.length === 0) return;
+
+    const send = async () => {
+      try {
+        const response = await this.#fetch("/api/actions", {
+          body: JSON.stringify({
+            actions: pending.map(({ action, targetId }) => ({ action, targetId })),
+          }),
+          headers: { "Content-Type": "application/json" },
+          keepalive: true,
+          method: "POST",
+        });
+        if (!response.ok) return fail("ACTION_FAILED");
+        pending.forEach(({ resolve }) => resolve());
+      } catch (error) {
+        const relayError =
+          error instanceof SupabaseRelayError
+            ? error
+            : new SupabaseRelayError("ACTION_FAILED");
+        pending.forEach(({ reject }) => reject(relayError));
+      }
+    };
+
+    const queued = this.#actionFlushChain.then(send, send);
+    this.#actionFlushChain = queued;
+    await queued;
+
+    if (this.#pendingActions.length > 0 && !this.#actionBatchTimer) {
+      this.#actionBatchTimer = setTimeout(
+        () => void this.#flushGuardedActions(),
+        this.#actionBatchMs,
+      );
     }
   }
 }

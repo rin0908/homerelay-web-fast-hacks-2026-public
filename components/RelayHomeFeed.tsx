@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { HomeFeed, type HomeFeedStatus } from "@/components/HomeFeed";
 import { RelatedHandoffsPanel } from "@/components/RelatedHandoffsPanel";
@@ -24,6 +24,8 @@ type RelayHomeFeedProps = {
   mode: RelayMode;
 };
 
+const EMPTY_FIXTURE_ENTRIES: HandoffEntry[] = [];
+
 function mergeFixtures(entries: HandoffEntry[], fixtures: HandoffEntry[]) {
   const ids = new Set(entries.map((entry) => entry.id));
   return [...entries, ...fixtures.filter((entry) => !ids.has(entry.id))];
@@ -31,7 +33,7 @@ function mergeFixtures(entries: HandoffEntry[], fixtures: HandoffEntry[]) {
 
 export function RelayHomeFeed({
   context,
-  fixtureEntries = [],
+  fixtureEntries = EMPTY_FIXTURE_ENTRIES,
   mode,
 }: RelayHomeFeedProps) {
   const [entries, setEntries] = useState<HandoffEntry[]>(
@@ -39,9 +41,12 @@ export function RelayHomeFeed({
   );
   const [status, setStatus] = useState<HomeFeedStatus>("loading");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [pendingActions, setPendingActions] = useState(0);
   const entriesRef = useRef(entries);
   const requestGeneration = useRef(0);
+  const pendingActionsRef = useRef(0);
+  const pendingEpochRef = useRef(0);
+  const batchBaseEntriesRef = useRef<HandoffEntry[] | null>(null);
   const relay = useMemo<HandoffRelay | null>(() => {
     if (mode === "demo") return createDemoRelay(context);
     const client = createClient();
@@ -59,19 +64,26 @@ export function RelayHomeFeed({
       : null;
   }, [context, mode]);
 
+  const commitEntries = useCallback((
+    next: HandoffEntry[],
+    { clearError = true }: { clearError?: boolean } = {},
+  ) => {
+    const normalized =
+      mode === "demo" ? mergeFixtures(next, fixtureEntries) : next;
+    entriesRef.current = normalized;
+    setEntries(normalized);
+    setStatus(normalized.length > 0 ? "ready" : "empty");
+    if (clearError) setErrorMessage(null);
+  }, [fixtureEntries, mode]);
+
   useEffect(() => {
     let active = true;
     if (!relay) return;
 
-    const normalize = (next: HandoffEntry[]) =>
-      mode === "demo" ? mergeFixtures(next, fixtureEntries) : next;
     const accept = (next: HandoffEntry[]) => {
       if (!active) return;
-      const normalized = normalize(next);
-      entriesRef.current = normalized;
-      setEntries(normalized);
-      setStatus(normalized.length > 0 ? "ready" : "empty");
-      setErrorMessage(null);
+      if (pendingActionsRef.current > 0) return;
+      commitEntries(next);
     };
     const fail = () => {
       if (!active) return;
@@ -91,26 +103,71 @@ export function RelayHomeFeed({
       active = false;
       unsubscribe();
     };
-  }, [fixtureEntries, mode, relay]);
+  }, [commitEntries, relay]);
 
-  async function applyAfter(
-    action: () => Promise<void>,
-    applyConfirmed: (current: HandoffEntry[]) => HandoffEntry[],
-  ) {
-    if (!relay || busy) return;
-    setBusy(true);
-    setErrorMessage(null);
+  async function refreshFromSource({ preserveError = false } = {}) {
+    if (!relay) return;
+    const generation = ++requestGeneration.current;
     try {
-      await action();
-      const next = applyConfirmed(entriesRef.current);
-      entriesRef.current = next;
-      setEntries(next);
-      setStatus(next.length > 0 ? "ready" : "empty");
+      const next = await relay.list();
+      if (
+        generation === requestGeneration.current &&
+        pendingActionsRef.current === 0
+      ) {
+        commitEntries(next, { clearError: !preserveError });
+      }
     } catch {
-      setErrorMessage("更新できませんでした。表示内容を保ったまま、もう一度お試しください。");
-    } finally {
-      setBusy(false);
+      setErrorMessage("保存結果を読み直せませんでした。通信を確認してください。");
+      if (entriesRef.current.length === 0) setStatus("error");
     }
+  }
+
+  function applyOptimistically(
+    action: () => Promise<void>,
+    applyLocal: (current: HandoffEntry[]) => HandoffEntry[],
+  ) {
+    if (!relay) return;
+    const previous = entriesRef.current;
+    const optimistic = applyLocal(previous);
+    if (optimistic === previous) return;
+
+    if (pendingActionsRef.current === 0) {
+      batchBaseEntriesRef.current = previous;
+    }
+    const epoch = pendingEpochRef.current;
+    pendingActionsRef.current += 1;
+    setPendingActions(pendingActionsRef.current);
+    entriesRef.current = optimistic;
+    setEntries(optimistic);
+    setStatus(optimistic.length > 0 ? "ready" : "empty");
+    setErrorMessage(null);
+
+    void action().then(
+      () => {
+        if (epoch !== pendingEpochRef.current) return;
+        pendingActionsRef.current = Math.max(0, pendingActionsRef.current - 1);
+        setPendingActions(pendingActionsRef.current);
+        if (pendingActionsRef.current === 0) {
+          batchBaseEntriesRef.current = null;
+          void refreshFromSource();
+        }
+      },
+      () => {
+        if (epoch !== pendingEpochRef.current) return;
+        pendingEpochRef.current += 1;
+        pendingActionsRef.current = 0;
+        setPendingActions(0);
+        const fallback = batchBaseEntriesRef.current;
+        batchBaseEntriesRef.current = null;
+        if (fallback) {
+          entriesRef.current = fallback;
+          setEntries(fallback);
+          setStatus(fallback.length > 0 ? "ready" : "empty");
+        }
+        setErrorMessage("更新できませんでした。最新の状態を読み直しています。");
+        void refreshFromSource({ preserveError: true });
+      },
+    );
   }
 
   function acknowledge(entryId: string, action: EntryStatus) {
@@ -121,7 +178,7 @@ export function RelayHomeFeed({
         : action === "claimed"
           ? () => relay.claimEntry(entryId)
           : () => relay.completeEntry(entryId);
-    void applyAfter(operation, (current) =>
+    applyOptimistically(operation, (current) =>
       applyConfirmedEntryAction(current, entryId, action, context.member),
     );
   }
@@ -141,20 +198,28 @@ export function RelayHomeFeed({
           {errorMessage}
         </p>
       ) : null}
+      {pendingActions > 0 ? (
+        <p
+          aria-live="polite"
+          className="mb-4 rounded-xl bg-[#edf5f1] p-3 text-sm font-semibold text-[var(--color-primary)]"
+          role="status"
+        >
+          タップを受け付けました。安全に反映しています…
+        </p>
+      ) : null}
       <HomeFeed
         afterFirstEntry={
           entries.length > 0 ? (
             <RelatedHandoffsPanel entry={entries[0]} mode={mode} />
           ) : null
         }
-        busy={busy}
         currentMemberId={context.member.id}
         entries={entries}
         errorMessage={errorMessage ?? undefined}
         onAcknowledge={acknowledge}
         onClaimItem={(_entryId, itemId) => {
           if (relay) {
-            void applyAfter(
+            applyOptimistically(
               () => relay.claimItem(itemId),
               (current) =>
                 applyConfirmedItemAction(
@@ -169,7 +234,7 @@ export function RelayHomeFeed({
         }}
         onCompleteItem={(_entryId, itemId) => {
           if (relay) {
-            void applyAfter(
+            applyOptimistically(
               () => relay.completeItem(itemId),
               (current) =>
                 applyConfirmedItemAction(

@@ -173,8 +173,8 @@ HOMERELAY_CLOUD_FOREIGN_FAMILY_EMAIL / HOMERELAY_CLOUD_FOREIGN_FAMILY_PASSWORD
 
 ### 合成・同一PC
 
-1. 家族タブで`/`、記録タブで`/record`を開く。
-2. `写真を撮る`→撮影→`この写真を使う`。
+1. 家族タブと記録タブで`/`を開く。
+2. 記録タブで`カメラを開く`→自動表示されたプレビューで`撮影`→`この写真を使う`。
 3. `声で話す`を押し、「昼食は半分ほど。水分を用意しました。トイレットペーパーが少ないです。」と話して停止する。
 4. 下書きを確認・修正し、`これでOK`。この時点では家族タブへ出ない。
 5. `次の人へ`を押し、家族タブへの反映を確認する。
@@ -184,7 +184,7 @@ HOMERELAY_CLOUD_FOREIGN_FAMILY_EMAIL / HOMERELAY_CLOUD_FOREIGN_FAMILY_PASSWORD
 
 ### HTTPSスマートフォン + 別PC
 
-同じHomeRelayクラウドSupabaseへ接続したHTTPSデプロイを両端末で開きます。PCは家族、スマートフォンはヘルパーでログインし、上記と同じ導線を実施します。背面カメラとマイクの許可、確認前の非共有、`次の人へ`後のRealtime反映を実機で確認してください。
+同じHomeRelayクラウドSupabaseへ接続したHTTPSデプロイを両端末で開きます。iPhoneでは最初にSafariの共有ボタンから`ホーム画面に追加`を選び、以後はHomeRelayアイコンから起動します。これにより通常のSafari URLバーを表示せず、同じ画面内でカメラとマイクを使えます。初回だけiOSのカメラ／マイク許可は必要で、このOS表示は隠しません。PCは家族、iPhoneはヘルパーでログインし、上記と同じ導線を実施します。確認前の非共有と、`次の人へ`後のRealtime反映を実機で確認してください。
 
 締めの言葉: 「HomeRelayは監視ではありません。写真と声だけで、次の人へ温かくバトンを渡すWebアプリです。」
 
@@ -237,6 +237,14 @@ Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY_AUDIO
 
 同日の最新検証は、lint、typecheck、49 files / 374 unit tests、14 synthetic E2E（Supabase live-only 2件は意図的skip）、production build、`.env.local`の実秘密値を非表示で照合するprivacy audit、秘密情報検査、production dependency脆弱性0件、`git diff --check`がPASSしました。privacy auditは170公開候補ファイル、到達可能Git履歴、27 browser配信ファイルを検査しました。これ以前の連続デモ検証では、`見ました`→`私がやります`→`できました`→`買います`→`買いました`までphone 2回・desktop 2回の計4回を実行し、AI失敗→空の手入力→本人確認→明示共有もphone/desktopでPASSしています。
 
+### iPhone導線と操作反応の改善（2026-09-01）
+
+通常のSafariでURLバーが見える問題に対し、standalone manifest、Apple Web App metadata、HomeRelay専用アイコン、ホーム画面追加案内を実装しました。ホームの`カメラを開く`から背面カメラを一度だけ自動起動するため、記録画面で同じ開始ボタンをもう一度押す必要はありません。シャッター、撮り直し、`この写真を使う`、音声開始、本人確認は意図しない撮影・録音・共有を防ぐため維持します。
+
+対応・購入の5操作は、タップ時に短い状態表示とともに即時反映し、認証付きのguarded RPCを順序どおり一括送信します。送信中のRealtime表示は保留してSupabase正本を最後に読み戻し、失敗時は楽観表示を戻して警告します。別batchも直列送信し、画面離脱時はpending actionを`keepalive`でflushします。Neo4j派生graphには`買います`と`買いました`の両イベントを残し、アクセス権限は引き続きSupabaseだけで判定します。
+
+このcheckpointではlint、typecheck、56 files / 433 unit tests、16 synthetic E2E（live-only 2件は意図的skip）、Next.js 16.3.3 production build、privacy audit、production dependency audit、`git diff --check`がPASSしました。privacy auditは190公開候補ファイル、到達可能Git履歴、41 browser配信ファイルを検査し、private media、credential pattern、runtime content log、server-secret markerを検出していません。新しいstandalone起動と即時操作は自動検証済みで、更新後Previewに対するiPhone＋Windowsの物理再試験が次のgateです。
+
 ### Qdrant / Neo4j live検証（2026-08-30）
 
 Qdrant Cloud Freeの`homerelay-qdrant`はHealthyです。collection bootstrap後、Cloud Inferenceによる類似申し送りと必要品の検索、別世帯filter、検証pointの削除と0件read-backがliveでPASSしました。
@@ -267,7 +275,7 @@ loopback検証に必要な`HOMERELAY_TEST_*`と`HOMERELAY_E2E_*`は、[HomeRelay
 - Qdrant: **Qdrant Cloud Freeへ実接続済み・live検証PASS**。`homerelay-qdrant`のHealthy、bootstrap、Cloud Inferenceの類似申し送り／必要品、別世帯filter、検証point削除後0件を確認しました。
 - Neo4j: **AuraDB Freeへ実接続済み・live検証PASS**。`homerelay-graph`のRunning、5 constraints、Home／foreign graphのparameterized write、関係read-back、Home filterでforeign 0件、両世帯cleanup後node／relationship各0件を確認しました。2026 Auraのusername／database形式にも対応済みです。
 - Datadog: verifierとserver-only numeric metricsは実装済みですが、AP1 Japanの認証コード送信／再送信が2つの異なるメールでDatadog側の「不明なエラー」になりました。API key未作成・未保存、live未実行のため**未接続・未使用**です。同じ登録操作は繰り返さず、他工程後に1回だけ再試行します。
-- CodeRabbit: `.coderabbit.yaml`を実装済み。GitHub App/PRレビュー未実施なので使用済みとは扱わない。
+- CodeRabbit: 正しいPRIVATE HomeRelay repositoryだけへGitHub Appを接続しPR #1でトリガー済みですが、PRIVATE repositoryのFree plan制限でレビューは実行されませんでした。指摘0件ではなくレビュー未実施であり、使用済みとは扱いません。有料化、trial開始、merge、公開化は行っていません。
 - HackerSquad: builder loginは成功しましたが、対象イベントがArchivedで提出ボタン／project導線がなく、project作成・提出は未実行です。提出済み・使用済みとは扱いません。
 
 詳細な目的、実装ファイル、検証、デモ箇所、必要資格情報は[SPONSOR_TOOL_EVIDENCE.md](SPONSOR_TOOL_EVIDENCE.md)にあります。

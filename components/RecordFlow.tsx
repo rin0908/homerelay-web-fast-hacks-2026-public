@@ -21,9 +21,11 @@ import type {
 import { createClient } from "@/lib/supabase/client";
 
 export function RecordFlow({
+  autoStartCamera = false,
   context,
   mode,
 }: {
+  autoStartCamera?: boolean;
   context: HandoffRelayContext;
   mode: RelayMode;
 }) {
@@ -71,6 +73,7 @@ export function RecordFlow({
   if (!accepted) {
     return (
       <CameraCapture
+        autoStart={autoStartCamera}
         onAccepted={(photo) => setAccepted({ photo, url: URL.createObjectURL(photo.blob) })}
       />
     );

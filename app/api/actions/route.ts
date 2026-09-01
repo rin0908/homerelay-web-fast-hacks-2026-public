@@ -8,13 +8,14 @@ import {
   scheduleHandoffActionGraphSync,
   schedulePurchaseActionGraphSync,
 } from "@/lib/neo4j/sync";
-import type { HandoffAction } from "@/lib/neo4j/types";
+import type { HandoffAction, PurchaseAction } from "@/lib/neo4j/types";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentSession } from "@/lib/supabase/session";
 
 export const runtime = "nodejs";
 
-const MAX_ACTION_BODY_BYTES = 1_024;
+const MAX_ACTION_BODY_BYTES = 4_096;
+const MAX_ACTIONS_PER_REQUEST = 10;
 
 const actionSchema = z
   .object({
@@ -29,9 +30,19 @@ const actionSchema = z
   })
   .strict();
 
+const actionRequestSchema = z.union([
+  actionSchema.transform((action) => [action]),
+  z
+    .object({
+      actions: z.array(actionSchema).min(1).max(MAX_ACTIONS_PER_REQUEST),
+    })
+    .strict()
+    .transform(({ actions }) => actions),
+]);
+
 type ActionInput = z.infer<typeof actionSchema>;
 type ParsedAction =
-  | Readonly<{ input: ActionInput; status: "ok" }>
+  | Readonly<{ inputs: ActionInput[]; status: "ok" }>
   | Readonly<{ status: "malformed" | "too_large" }>;
 type EntryActionName =
   | "acknowledge_entry"
@@ -43,6 +54,14 @@ const ENTRY_GRAPH_ACTION: Record<EntryActionName, HandoffAction> = {
   claim_entry: "claimed",
   complete_entry: "done",
 };
+
+const PURCHASE_GRAPH_ACTION = {
+  claim_needed_item: "purchase_intent",
+  complete_needed_item: "purchased",
+} as const satisfies Record<
+  Exclude<ActionInput["action"], EntryActionName>,
+  PurchaseAction
+>;
 
 function isEntryAction(action: ActionInput["action"]): action is EntryActionName {
   return action in ENTRY_GRAPH_ACTION;
@@ -67,9 +86,9 @@ async function parseAction(request: Request): Promise<ParsedAction> {
   if (bounded.status !== "ok") return bounded;
 
   try {
-    const result = actionSchema.safeParse(await bounded.request.json());
+    const result = actionRequestSchema.safeParse(await bounded.request.json());
     return result.success
-      ? { input: result.data, status: "ok" }
+      ? { inputs: result.data, status: "ok" }
       : { status: "malformed" };
   } catch {
     return { status: "malformed" };
@@ -89,7 +108,7 @@ async function postAction(request: Request) {
       parsed.status === "too_large" ? 413 : 400,
     );
   }
-  const { input } = parsed;
+  const { inputs } = parsed;
 
   const supabase = await createClient();
   if (!supabase) return jsonError("Supabaseへ接続できません", 503);
@@ -97,64 +116,83 @@ async function postAction(request: Request) {
   const session = await getCurrentSession(supabase);
   if (!session) return jsonError("ログインが必要です", 401);
 
-  const graphAction = isEntryAction(input.action)
-    ? ENTRY_GRAPH_ACTION[input.action]
-    : null;
-  const parameterName = graphAction ? "p_entry_id" : "p_item_id";
-  const { error } = await supabase.rpc(input.action, {
-    [parameterName]: input.targetId,
-  });
-  if (error) {
-    return jsonError(
-      "操作を完了できませんでした",
-      databaseErrorStatus(error),
-    );
-  }
+  const itemGraphActions = new Map<
+    string,
+    Array<{ action: PurchaseAction; occurredAt: string }>
+  >();
+  for (const input of inputs) {
+    const graphAction = isEntryAction(input.action)
+      ? ENTRY_GRAPH_ACTION[input.action]
+      : null;
+    const parameterName = graphAction ? "p_entry_id" : "p_item_id";
+    const { error } = await supabase.rpc(input.action, {
+      [parameterName]: input.targetId,
+    });
+    if (error) {
+      return jsonError(
+        "操作を完了できませんでした",
+        databaseErrorStatus(error),
+      );
+    }
 
-  if (integration.neo4j.active) {
-    try {
-      const occurredAt = new Date().toISOString();
-      if (graphAction) {
+    if (!integration.neo4j.active) continue;
+    if (isEntryAction(input.action)) {
+      try {
         scheduleHandoffActionGraphSync({
-          action: graphAction,
+          action: ENTRY_GRAPH_ACTION[input.action],
           entryId: input.targetId,
           householdId: session.member.householdId,
           memberId: session.member.id,
           memberRole: session.member.role,
-          occurredAt,
+          occurredAt: new Date().toISOString(),
         });
-      } else {
+      } catch {
+        // Optional graph projection can never change the successful RPC result.
+      }
+    } else {
+      const actions = itemGraphActions.get(input.targetId) ?? [];
+      actions.push({
+        action: PURCHASE_GRAPH_ACTION[input.action],
+        occurredAt: new Date().toISOString(),
+      });
+      itemGraphActions.set(input.targetId, actions);
+    }
+  }
+
+  if (integration.neo4j.active) {
+    for (const [itemId, actions] of itemGraphActions) {
+      try {
         const { data: item, error: itemError } = await supabase
           .from("needed_items")
           .select("id, entry_id, household_id, status")
-          .eq("id", input.targetId)
+          .eq("id", itemId)
           .maybeSingle();
-        const expectedStatus =
-          input.action === "claim_needed_item"
-            ? "purchase_intent"
-            : "purchased";
+        const expectedStatus = actions.at(-1)?.action;
 
         if (
           !itemError &&
           item &&
-          item.id === input.targetId &&
+          item.id === itemId &&
           typeof item.entry_id === "string" &&
           item.household_id === session.member.householdId &&
+          expectedStatus &&
           item.status === expectedStatus
         ) {
-          schedulePurchaseActionGraphSync({
-            action: expectedStatus,
-            entryId: item.entry_id,
-            householdId: session.member.householdId,
-            itemId: input.targetId,
-            memberId: session.member.id,
-            memberRole: session.member.role,
-            occurredAt,
-          });
+          for (const action of actions) {
+            schedulePurchaseActionGraphSync({
+              action: action.action,
+              entryId: item.entry_id,
+              householdId: session.member.householdId,
+              itemId,
+              memberId: session.member.id,
+              memberRole: session.member.role,
+              occurredAt: action.occurredAt,
+            });
+          }
         }
+      } catch {
+        // Optional graph projection can never change the successful RPC result.
       }
-    } catch {
-      // Optional graph projection can never change the successful RPC result.
     }
   }
 

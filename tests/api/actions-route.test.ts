@@ -27,7 +27,7 @@ const HOUSEHOLD_ID = "10000000-0000-4000-8000-000000000001";
 const MEMBER_ID = "20000000-0000-4000-8000-000000000001";
 const ENTRY_ID = "30000000-0000-4000-8000-000000000001";
 const ITEM_ID = "40000000-0000-4000-8000-000000000001";
-const MAX_ACTION_BODY_BYTES = 1_024;
+const MAX_ACTION_BODY_BYTES = 4_096;
 
 function request(action: string, targetId: string = ENTRY_ID) {
   return new Request("http://localhost/api/actions", {
@@ -122,6 +122,33 @@ describe("POST /api/actions", () => {
     ["claim_entry", "request-controlled"],
   ])("rejects invalid action input", async (action, targetId) => {
     const response = await POST(request(action, targetId));
+
+    expect(response.status).toBe(400);
+    expect(mocks.createClient).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { actions: [] },
+    {
+      actions: Array.from({ length: 11 }, () => ({
+        action: "claim_entry",
+        targetId: ENTRY_ID,
+      })),
+    },
+    {
+      actions: [
+        { action: "claim_entry", targetId: ENTRY_ID },
+        { action: "unknown_action", targetId: ENTRY_ID },
+      ],
+    },
+  ])("rejects an invalid action batch without authenticating", async (body) => {
+    const response = await POST(
+      new Request("http://localhost/api/actions", {
+        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    );
 
     expect(response.status).toBe(400);
     expect(mocks.createClient).not.toHaveBeenCalled();
@@ -223,6 +250,69 @@ describe("POST /api/actions", () => {
       expect(serialized).not.toContain("合成家族");
     },
   );
+
+  it("runs a rapid household action sequence in order after one authentication", async () => {
+    const { supabase } = createSupabaseMock({ status: "purchased" });
+    mocks.createClient.mockResolvedValue(supabase);
+    const response = await POST(
+      new Request("http://localhost/api/actions", {
+        body: JSON.stringify({
+          actions: [
+            { action: "acknowledge_entry", targetId: ENTRY_ID },
+            { action: "claim_entry", targetId: ENTRY_ID },
+            { action: "complete_entry", targetId: ENTRY_ID },
+            { action: "claim_needed_item", targetId: ITEM_ID },
+            { action: "complete_needed_item", targetId: ITEM_ID },
+          ],
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(204);
+    expect(mocks.getCurrentSession).toHaveBeenCalledOnce();
+    expect(supabase.rpc.mock.calls).toEqual([
+      ["acknowledge_entry", { p_entry_id: ENTRY_ID }],
+      ["claim_entry", { p_entry_id: ENTRY_ID }],
+      ["complete_entry", { p_entry_id: ENTRY_ID }],
+      ["claim_needed_item", { p_item_id: ITEM_ID }],
+      ["complete_needed_item", { p_item_id: ITEM_ID }],
+    ]);
+    expect(mocks.schedulePurchaseActionGraphSync).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "purchased", itemId: ITEM_ID }),
+    );
+    expect(mocks.schedulePurchaseActionGraphSync.mock.calls).toEqual([
+      [expect.objectContaining({ action: "purchase_intent", itemId: ITEM_ID })],
+      [expect.objectContaining({ action: "purchased", itemId: ITEM_ID })],
+    ]);
+  });
+
+  it("stops a batch after the first guarded RPC failure", async () => {
+    const { rpc, supabase } = createSupabaseMock();
+    rpc
+      .mockResolvedValueOnce({ data: true, error: null })
+      .mockResolvedValueOnce({ data: null, error: { code: "P0001" } });
+    mocks.createClient.mockResolvedValue(supabase);
+
+    const response = await POST(
+      new Request("http://localhost/api/actions", {
+        body: JSON.stringify({
+          actions: [
+            { action: "acknowledge_entry", targetId: ENTRY_ID },
+            { action: "claim_entry", targetId: ENTRY_ID },
+            { action: "complete_entry", targetId: ENTRY_ID },
+          ],
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(rpc).not.toHaveBeenCalledWith("complete_entry", expect.anything());
+  });
 
   it.each([
     ["claim_needed_item", "purchase_intent"],

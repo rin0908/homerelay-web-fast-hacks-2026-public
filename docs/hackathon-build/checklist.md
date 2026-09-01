@@ -24,7 +24,7 @@
   Verify: Lint/typecheck plus visual check at approximately 390px and 1280px widths.
 
 - [ ] **3. Implement in-page camera capture — Partial**
-  Current status: Implementation and automated browser coverage pass; the required HTTPS smartphone permission/camera check is still pending.
+  Current status: HTTPS Previewで実iPhoneの背面カメラ撮影と許可は確認済みです。通常SafariのURLバーを避けるstandalone PWA metadataとホーム画面追加案内、`カメラを開く`から一度だけ自動開始する導線も実装し、Strict Mode、permission error、phone/desktop E2Eを通過しました。更新後Previewでのstandalone物理再確認だけが残ります。
   Spec ref: `spec.md > Camera And Audio`; `prd.md > Epic 1`
   What to build: Rear-camera preview, capture, retake, accept, cleanup, image re-encoding/compression, and fallback only when needed.
   Acceptance: On HTTPS phone, user can capture without selecting a saved photo; tracks stop and temporary images are discarded on retake/cancel.
@@ -44,15 +44,15 @@
   Acceptance: Same-household access works; another household cannot select, insert, update, or access photos.
   Verify: SQL/RLS positive and negative tests; Supabase advisors where available.
 
-- [ ] **6. Save confirmed handoffs and update in realtime — Implementation complete; physical two-device gate pending**
-  Current status: Supabase mode stores only the human-confirmed handoff, private photo and SHA-256-bound idempotency payload, then refreshes a separate authenticated browser context through Postgres Changes. A hosted cloud verifier received an `entries` event for the same household and no event for the foreign household; publication read-back confirms `entries`, `needed_items`, and `acknowledgements`. The browser-local relay remains a separately labeled demo fallback and is never used after a live failure. Hosted HTTPS smartphone-to-PC verification is still pending.
+- [x] **6. Save confirmed handoffs and update in realtime — Complete and physically verified**
+  Current status: Supabase mode stores only the human-confirmed handoff, private photo and SHA-256-bound idempotency payload, then refreshes a separate authenticated browser context through Postgres Changes. A hosted cloud verifier received an `entries` event for the same household and no event for the foreign household; publication read-back confirms `entries`, `needed_items`, and `acknowledgements`. An actual iPhone helper session shared a confirmed handoff to a separate Windows family session over HTTPS Realtime. The browser-local relay remains a separately labeled demo fallback and is never used after a live failure.
   Spec ref: `prd.md > Epic 3`; `spec.md > Architecture`
   What to build: Confirm/share mutation, idempotency, upload/storage ordering, confirmed-only Realtime subscription, optimistic UI with failure rollback.
   Acceptance: Second device receives a confirmed entry within seconds; drafts never appear; failed share never appears successful.
   Verify: Two-browser and two-device test with timestamps; duplicate-click test.
 
 - [x] **7. Implement action and needed-item states — Complete and locally verified**
-  Current status: `見ました`, `私がやります`, `できました`, `買います`, and `買いました` use session-derived guarded RPCs, durable attribution, ownership checks, idempotent repeats, and Realtime updates. The two-client integration test passes every transition.
+  Current status: `見ました`, `私がやります`, `できました`, `買います`, and `買いました` use session-derived guarded RPCs, durable attribution, ownership checks, idempotent repeats, and Realtime updates. Each tap now updates the UI immediately; rapid operations are authenticated once per batch, sent in order, read back from Supabase, rolled back on failure, and flushed with keepalive before page exit. Neo4j receives both purchase-intent and purchased events without becoming an authorization source. Focused transition, concurrency, failure, and two-client tests pass.
   Spec ref: `prd.md > Epic 3` and `Epic 4`
   What to build: General acknowledgement/claim/done flow and needed-item purchase intent/purchased flow with attribution.
   Acceptance: Exact words are used; transitions persist and update another device; duplicate claims are handled safely.
@@ -73,7 +73,7 @@
   Verify: Unit/integration tests, accessibility scan, secret scan, production build.
 
 - [ ] **10. Run the winning demo twice and prepare handoff — Local evidence complete; external/manual gates pending**
-  Current status: The offline synthetic suite passes 14 browser tests with the final action wording and explicit AI-failure manual path; the full demo flow additionally passed twice on 390px and twice on desktop. The HomeRelay local-Supabase flow previously passed twice consecutively between an isolated 390px helper context and a separate desktop family context in one 53.4-second test. Playwright now always starts its own server and disables optional vendors; the Supabase suite fulfills a strict synthetic draft in-browser so it cannot spend OpenAI credit or leave Qdrant/Neo4j data. OpenAI, Supabase, Qdrant Cloud Free, and Neo4j AuraDB Free are live verified separately. A hosted HTTPS deployment, real smartphone plus separate physical PC, and PRIVATE GitHub/CodeRabbit review remain pending. Datadog is explicitly unconnected and unused: AP1 Japan registration failed with the same vendor-side unknown error for two different email addresses, so registration will not be repeated until one final attempt after the other work. HackerSquad builder login succeeded, but the target event is Archived and exposes neither a submission button nor a project path, so no submission was attempted.
+  Current status: The offline synthetic suite passes 16 browser tests with the final action wording, one-tap camera start, and explicit AI-failure manual path; the full demo flow previously passed twice on 390px and twice on desktop. The HomeRelay local-Supabase flow passed twice consecutively between an isolated 390px helper context and a separate desktop family context in one 53.4-second test. A Vercel HTTPS Preview and actual iPhone helper plus separate Windows family session completed the live central flow, including Realtime actions and purchase completion, but the recorded end-to-end time was about 121 seconds; two consecutive runs within 60 seconds have not passed. The PRIVATE GitHub repository and PR #1 exist, but CodeRabbit did not review the PR under the PRIVATE Free limitation. OpenAI, Supabase, Qdrant Cloud Free, and Neo4j AuraDB Free are live verified; Datadog is unconnected/unused, and HackerSquad is Archived/unsubmitted. The updated Preview still needs a physical standalone regression before the 60-second goal is reassessed.
   Spec ref: `CODEX_START_HERE.md > Winning demo`
   What to build: Seed deterministic synthetic data, write exact run/deploy instructions, capture verification notes, and list live versus fallback integrations.
   Acceptance: The 60-second flow succeeds twice consecutively on a phone and family screen.

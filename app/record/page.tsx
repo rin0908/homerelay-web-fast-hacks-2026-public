@@ -9,7 +9,15 @@ import { DEMO_HELPER_CONTEXT } from "@/lib/relay/contexts";
 import type { HandoffRelayContext, RelayMode } from "@/lib/relay/types";
 import { getCurrentSession } from "@/lib/supabase/session";
 
-export default async function RecordPage() {
+export default async function RecordPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ camera?: string | string[] }>;
+}) {
+  const requestedCamera = (await searchParams).camera;
+  const autoStartCamera =
+    requestedCamera === "1" ||
+    (Array.isArray(requestedCamera) && requestedCamera.includes("1"));
   const status = getIntegrationStatus();
   if (status.dataMode === "misconfigured") {
     return (
@@ -92,6 +100,7 @@ export default async function RecordPage() {
 
       <div className="mt-6">
         <RecordFlow
+          autoStartCamera={autoStartCamera}
           context={context}
           key={`${context.householdId}:${context.member.id}`}
           mode={mode}

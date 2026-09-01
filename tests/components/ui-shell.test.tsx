@@ -39,7 +39,10 @@ describe("warm UI shell", () => {
 
     rerender(<HomeFeed entries={[]} status="empty" />);
     expect(screen.getByRole("heading", { name: "最初の申し送りを始めましょう" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "写真を撮る" })).toHaveAttribute("href", "/record");
+    expect(screen.getByRole("link", { name: "カメラを開く" })).toHaveAttribute(
+      "href",
+      "/record?camera=1",
+    );
 
     rerender(<HomeFeed entries={[]} status="error" />);
     expect(screen.getByRole("alert")).toHaveTextContent("うまく読み込めませんでした");

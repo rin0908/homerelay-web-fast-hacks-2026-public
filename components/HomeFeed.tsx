@@ -25,7 +25,7 @@ export function HomeFeed({
   entries,
   status = entries.length > 0 ? "ready" : "empty",
   errorMessage = "申し送りを読み込めませんでした。",
-  captureHref = "/record",
+  captureHref = "/record?camera=1",
   onAcknowledge,
   onClaimItem,
   onCompleteItem,
@@ -69,7 +69,7 @@ export function HomeFeed({
         </p>
         <Link className="primary-button mt-6 w-full sm:w-auto" href={captureHref}>
           <Camera aria-hidden="true" size={21} />
-          写真を撮る
+          カメラを開く
         </Link>
       </section>
     );
