@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
+import { sessionIdFromClaims } from "@/lib/supabase/session-guard";
 import type { MemberRole } from "@/types/handoff";
 
 export type CurrentMember = {
@@ -15,6 +16,7 @@ export type CurrentMember = {
 
 export type HomeRelaySession = {
   member: CurrentMember;
+  sessionId: string;
   userId: string;
 };
 
@@ -62,8 +64,14 @@ export async function getCurrentSession(
     const { data: claimsData, error: claimsError } =
       await supabase.auth.getClaims();
     const authUserId = claimsData?.claims?.sub;
+    const sessionId = sessionIdFromClaims(claimsData?.claims);
 
-    if (claimsError || typeof authUserId !== "string" || !authUserId) {
+    if (
+      claimsError ||
+      typeof authUserId !== "string" ||
+      !authUserId ||
+      !sessionId
+    ) {
       return null;
     }
 
@@ -76,7 +84,7 @@ export async function getCurrentSession(
     if (error) return null;
 
     const member = parseMember(data as MemberRow | null, authUserId);
-    return member ? { member, userId: authUserId } : null;
+    return member ? { member, sessionId, userId: authUserId } : null;
   } catch {
     return null;
   }

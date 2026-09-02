@@ -8,6 +8,7 @@ import { getIntegrationStatus } from "@/lib/integration-status";
 import { DEMO_HELPER_CONTEXT } from "@/lib/relay/contexts";
 import type { HandoffRelayContext, RelayMode } from "@/lib/relay/types";
 import { getCurrentSession } from "@/lib/supabase/session";
+import { fingerprintSessionId } from "@/lib/supabase/session-guard";
 
 export default async function RecordPage({
   searchParams,
@@ -39,6 +40,8 @@ export default async function RecordPage({
   }
 
   let context: HandoffRelayContext = DEMO_HELPER_CONTEXT;
+  let expectedAuthUserId: string | null = null;
+  let expectedSessionFingerprint: string | null = null;
   let mode: RelayMode = "demo";
   if (status.dataMode === "supabase") {
     const session = await getCurrentSession();
@@ -51,11 +54,18 @@ export default async function RecordPage({
         role: session.member.role,
       },
     };
+    expectedAuthUserId = session.userId;
+    expectedSessionFingerprint = await fingerprintSessionId(session.sessionId);
+    if (!expectedSessionFingerprint) redirect("/login");
     mode = "supabase";
   }
 
   return (
-    <AuthSessionBoundary mode={mode}>
+    <AuthSessionBoundary
+      expectedAuthUserId={expectedAuthUserId}
+      expectedSessionFingerprint={expectedSessionFingerprint}
+      mode={mode}
+    >
     <main className="mx-auto min-h-screen w-full max-w-4xl px-5 py-6 sm:px-8 sm:py-8">
       {mode === "demo" ? <DemoModeBanner /> : null}
       <nav className="mt-6" aria-label="戻る">

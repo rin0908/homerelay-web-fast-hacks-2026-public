@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthSessionBoundary } from "@/components/AuthSessionBoundary";
+import { LogoutButton } from "@/app/logout/LogoutButton";
 import { DemoModeBanner } from "@/components/DemoModeBanner";
 import { ArrowRight, Camera, HeartHandshake } from "@/components/Icons";
 import { IphoneInstallHint } from "@/components/IphoneInstallHint";
@@ -10,6 +11,7 @@ import { getIntegrationStatus } from "@/lib/integration-status";
 import { DEMO_FAMILY_CONTEXT } from "@/lib/relay/contexts";
 import type { HandoffRelayContext, RelayMode } from "@/lib/relay/types";
 import { getCurrentSession } from "@/lib/supabase/session";
+import { fingerprintSessionId } from "@/lib/supabase/session-guard";
 import { SYNTHETIC_ENTRIES } from "@/lib/synthetic-data";
 
 export default async function HomePage() {
@@ -31,6 +33,8 @@ export default async function HomePage() {
   }
 
   let context: HandoffRelayContext = DEMO_FAMILY_CONTEXT;
+  let expectedAuthUserId: string | null = null;
+  let expectedSessionFingerprint: string | null = null;
   let mode: RelayMode = "demo";
   if (status.dataMode === "supabase") {
     const session = await getCurrentSession();
@@ -43,11 +47,18 @@ export default async function HomePage() {
         role: session.member.role,
       },
     };
+    expectedAuthUserId = session.userId;
+    expectedSessionFingerprint = await fingerprintSessionId(session.sessionId);
+    if (!expectedSessionFingerprint) redirect("/login");
     mode = "supabase";
   }
 
   return (
-    <AuthSessionBoundary mode={mode}>
+    <AuthSessionBoundary
+      expectedAuthUserId={expectedAuthUserId}
+      expectedSessionFingerprint={expectedSessionFingerprint}
+      mode={mode}
+    >
     <main className="mx-auto min-h-screen w-full max-w-7xl px-5 pb-[calc(env(safe-area-inset-bottom)+6.5rem)] pt-5 sm:px-8 sm:pt-7 lg:px-10 lg:pb-7">
       {mode === "demo" ? <DemoModeBanner /> : null}
       <IphoneInstallHint />
@@ -67,13 +78,7 @@ export default async function HomePage() {
             {context.member.displayName}
           </span>
           <RoleBadge role={context.member.role} />
-          {mode === "supabase" ? (
-            <form action="/logout" method="post">
-              <button className="secondary-button min-h-10 px-3 py-2 text-sm" type="submit">
-                ログアウト
-              </button>
-            </form>
-          ) : null}
+          {mode === "supabase" ? <LogoutButton /> : null}
         </div>
       </header>
 

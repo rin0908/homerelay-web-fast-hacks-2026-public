@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
-const LIVE_ENABLED = process.env.HOMERELAY_E2E_LIVE === "true";
+const LIVE_ENABLED =
+  process.env.HOMERELAY_E2E_LIVE?.trim().toLowerCase() === "true";
 const LIVE_PASSWORD = process.env.HOMERELAY_E2E_PASSWORD?.trim() ?? "";
 const LIVE_SUPABASE_SECRET_KEY =
   process.env.HOMERELAY_E2E_SUPABASE_SECRET_KEY?.trim() ?? "";

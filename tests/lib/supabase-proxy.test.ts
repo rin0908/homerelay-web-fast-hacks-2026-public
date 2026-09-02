@@ -16,8 +16,14 @@ vi.mock("@/lib/supabase/env", () => ({
 }));
 
 import { updateSession } from "@/lib/supabase/proxy";
+import {
+  activeSessionGuardValue,
+  SESSION_GUARD_COOKIE_NAME,
+  signedOutSessionGuardValue,
+} from "@/lib/supabase/session-guard";
 
 type ClientOptions = {
+  global: { fetch: typeof fetch };
   cookies: {
     getAll: () => { name: string; value: string }[];
     setAll: (
@@ -81,12 +87,116 @@ describe("Supabase session Proxy", () => {
 
     const response = await updateSession(request);
 
+    expect(clientOptions?.global.fetch).toEqual(expect.any(Function));
     expect(mocks.getClaims).toHaveBeenCalledOnce();
     expect(mocks.getSession).not.toHaveBeenCalled();
     expect(request.cookies.get("sb-session")?.value).toBe("synthetic-session");
     expect(response.cookies.get("sb-session")?.value).toBe("synthetic-session");
     expect(response.headers.get("cache-control")).toContain("private");
     expect(response.headers.get("cache-control")).toContain("no-store");
+  });
+
+  it("releases refreshed cookies only when an active guard matches session_id", async () => {
+    const sessionId = "11111111-1111-4111-8111-111111111111";
+    const guard = await activeSessionGuardValue(sessionId);
+    const request = new NextRequest("https://homerelay.test/", {
+      headers: {
+        cookie: `${SESSION_GUARD_COOKIE_NAME}=${guard}; sb-synthetic-auth-token=old`,
+      },
+    });
+    mocks.getClaims.mockImplementation(async () => {
+      clientOptions?.cookies.setAll(
+        [
+          {
+            name: "sb-synthetic-auth-token",
+            options: { httpOnly: true, path: "/" },
+            value: "refreshed",
+          },
+        ],
+        {},
+      );
+      return {
+        data: { claims: { session_id: sessionId, sub: "synthetic-user" } },
+        error: null,
+      };
+    });
+
+    const response = await updateSession(request);
+
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.cookies.get("sb-synthetic-auth-token")?.value).toBe(
+      "refreshed",
+    );
+    expect(response.cookies.get(SESSION_GUARD_COOKIE_NAME)).toBeUndefined();
+  });
+
+  it("rejects a different session_id and deletes only HomeRelay auth cookies", async () => {
+    const guard = await activeSessionGuardValue(
+      "11111111-1111-4111-8111-111111111111",
+    );
+    const request = new NextRequest("https://homerelay.test/record", {
+      headers: {
+        cookie: [
+          `${SESSION_GUARD_COOKIE_NAME}=${guard}`,
+          "sb-synthetic-auth-token=foreign-session",
+          "sb-other-auth-token=keep-me",
+          "unrelated=keep-me-too",
+        ].join("; "),
+      },
+    });
+    mocks.getClaims.mockResolvedValue({
+      data: {
+        claims: {
+          session_id: "22222222-2222-4222-8222-222222222222",
+          sub: "synthetic-user",
+        },
+      },
+      error: null,
+    });
+
+    const response = await updateSession(request);
+
+    expect(response.headers.get("location")).toBe(
+      "https://homerelay.test/login",
+    );
+    expect(response.cookies.get("sb-synthetic-auth-token")?.value).toBe("");
+    expect(response.cookies.get("sb-synthetic-auth-token")?.maxAge).toBe(0);
+    expect(response.cookies.get("sb-other-auth-token")).toBeUndefined();
+    expect(response.cookies.get("unrelated")).toBeUndefined();
+    expect(response.cookies.get(SESSION_GUARD_COOKIE_NAME)).toBeUndefined();
+  });
+
+  it("makes signed-out authoritative without contacting Supabase", async () => {
+    const request = new NextRequest("https://homerelay.test/", {
+      headers: {
+        cookie: `${SESSION_GUARD_COOKIE_NAME}=${signedOutSessionGuardValue()}; sb-synthetic-auth-token=late`,
+      },
+    });
+
+    const response = await updateSession(request);
+
+    expect(response.headers.get("location")).toBe(
+      "https://homerelay.test/login",
+    );
+    expect(response.cookies.get("sb-synthetic-auth-token")?.maxAge).toBe(0);
+    expect(mocks.createServerClient).not.toHaveBeenCalled();
+  });
+
+  it("strips stale auth from a login POST request without expiring a new response cookie", async () => {
+    const request = new NextRequest("https://homerelay.test/login", {
+      headers: {
+        cookie: `${SESSION_GUARD_COOKIE_NAME}=${signedOutSessionGuardValue()}; sb-synthetic-auth-token=late`,
+      },
+      method: "POST",
+    });
+
+    const response = await updateSession(request);
+
+    expect(response.headers.get("x-middleware-request-cookie")).toContain(
+      "sb-synthetic-auth-token=",
+    );
+    expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
+    expect(mocks.createServerClient).not.toHaveBeenCalled();
   });
 
   it("redirects an unauthenticated protected request to login", async () => {

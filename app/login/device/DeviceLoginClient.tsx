@@ -8,16 +8,19 @@ import {
   type DeviceLoginOutcome,
   type DeviceLoginRole,
 } from "@/lib/supabase/device-login";
-import { createClient } from "@/lib/supabase/client";
+import {
+  createEphemeralClient,
+  createTransferClient,
+} from "@/lib/supabase/client";
 
 let capturedHash = "";
 if (typeof window !== "undefined") {
   capturedHash = window.location.hash;
-  if (capturedHash) {
+  if (capturedHash || window.location.search) {
     window.history.replaceState(
       null,
       "",
-      window.location.pathname + window.location.search,
+      window.location.pathname,
     );
   }
 }
@@ -28,6 +31,30 @@ const MESSAGE: Record<Exclude<DeviceLoginOutcome, "success">, string> = {
     "招待済みの家族または訪問ヘルパーであることを確認できませんでした。",
   unavailable: "現在ログインを確認できません。再発行してからお試しください。",
 };
+
+async function prepareDeviceSession(): Promise<boolean> {
+  const response = await fetch("/login/device/session?phase=begin", {
+    credentials: "same-origin",
+    method: "POST",
+  });
+  return response.ok;
+}
+
+async function completeDeviceSession({
+  authUserId,
+  expectedRole,
+}: {
+  authUserId: string;
+  expectedRole: DeviceLoginRole;
+}): Promise<boolean> {
+  const response = await fetch("/login/device/session?phase=complete", {
+    body: JSON.stringify({ authUserId, expectedRole }),
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  return response.ok;
+}
 
 export function DeviceLoginClient({
   expectedRole,
@@ -47,10 +74,16 @@ export function DeviceLoginClient({
     if (!authenticationRef.current) {
       const hash = capturedHash;
       capturedHash = "";
-      const supabase = createClient();
-      authenticationRef.current = supabase
-        ? consumeDeviceMagicLink(supabase, hash, expectedRole)
-        : Promise.resolve("unavailable");
+      authenticationRef.current = consumeDeviceMagicLink(
+        {
+          completePersistentSession: completeDeviceSession,
+          createPersistentClient: createTransferClient,
+          createVerificationClient: createEphemeralClient,
+          preparePersistentSession: prepareDeviceSession,
+        },
+        hash,
+        expectedRole,
+      ).catch(() => "unavailable");
     }
 
     const authentication = authenticationRef.current;

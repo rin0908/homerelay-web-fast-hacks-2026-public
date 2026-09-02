@@ -4,6 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
+import { createSupabaseAbortingFetch } from "@/lib/supabase/aborting-fetch";
 import { getSupabasePublicConfig } from "@/lib/supabase/env";
 
 export async function createClient(): Promise<SupabaseClient | null> {
@@ -13,6 +14,7 @@ export async function createClient(): Promise<SupabaseClient | null> {
   const cookieStore = await cookies();
 
   return createServerClient(config.url, config.publishableKey, {
+    global: { fetch: createSupabaseAbortingFetch() },
     cookies: {
       getAll() {
         return cookieStore.getAll();

@@ -43,6 +43,7 @@ const DEFAULT_PHOTO_BUCKET = "handoff-photos";
 const DEFAULT_SIGNED_URL_SECONDS = 300;
 const DEFAULT_DEBOUNCE_MS = 120;
 const DEFAULT_ACTION_BATCH_MS = 650;
+const DEFAULT_ACTION_TIMEOUT_MS = 15_000;
 const MAX_ACTION_BATCH_SIZE = 10;
 const LIST_LIMIT = 10;
 const PRIVATE_PHOTO_PLACEHOLDER =
@@ -71,6 +72,7 @@ export type SupabaseRelayContext = {
 
 export type SupabaseRelayOptions = {
   actionBatchMs?: number;
+  actionTimeoutMs?: number;
   fetch?: RelayFetch;
   photoBucket?: string;
   signedUrlSeconds?: number;
@@ -111,10 +113,36 @@ async function readCompletedActionCount(
   response: Response,
   batchSize: number,
 ): Promise<number> {
+  // A malformed but fully received payload means the server did not attest to
+  // any completed prefix, so zero is the conservative explicit result. A body
+  // read failure is different: the server may already have committed actions
+  // before the connection was lost. Let that transport error escape so the
+  // relay enters its outcome-uncertain state and blocks dependent transitions.
+  return completedActionCount(await response.json(), batchSize);
+}
+
+async function runActionRequestWithTimeout<T>(
+  fetchImpl: RelayFetch,
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  readResponse: (response: Response) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
   try {
-    return completedActionCount(await response.json(), batchSize);
-  } catch {
-    return 0;
+    return await Promise.race([
+      fetchImpl(input, { ...init, signal: controller.signal }).then(readResponse),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new SupabaseRelayError("ACTION_FAILED"));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -196,9 +224,11 @@ export class SupabaseRelay implements HandoffRelay {
   readonly #signedUrlSeconds: number;
   readonly #debounceMs: number;
   readonly #actionBatchMs: number;
+  readonly #actionTimeoutMs: number;
   readonly #onSubscriptionError?: (error: SupabaseRelayError) => void;
   #actionBatchTimer: ReturnType<typeof setTimeout> | null = null;
   #actionFlushChain: Promise<void> = Promise.resolve();
+  #actionOutcomeUncertain = false;
   #pendingActions: PendingGuardedAction[] = [];
 
   constructor(
@@ -216,6 +246,8 @@ export class SupabaseRelay implements HandoffRelay {
       options.signedUrlSeconds ?? DEFAULT_SIGNED_URL_SECONDS;
     this.#debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     this.#actionBatchMs = options.actionBatchMs ?? DEFAULT_ACTION_BATCH_MS;
+    this.#actionTimeoutMs =
+      options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
     this.#onSubscriptionError = options.onSubscriptionError;
   }
 
@@ -230,7 +262,7 @@ export class SupabaseRelay implements HandoffRelay {
 
       if (error || !Array.isArray(data)) return fail("LIST_FAILED");
 
-      return await Promise.all(
+      const entries = await Promise.all(
         data.map(async (value) => {
           const row = value as unknown as SupabaseListEntryRow;
           const { data: signed, error: signedError } = await this.#client.storage
@@ -245,6 +277,13 @@ export class SupabaseRelay implements HandoffRelay {
           );
         }),
       );
+      // A successful authoritative read is the recovery boundary after an
+      // uncertain action response. Every guarded RPC is an atomic,
+      // state-checked transition (and same-member retries are idempotent), so
+      // a retry after this read can only succeed/no-op or be rejected by the
+      // current Supabase state; it cannot skip a transition.
+      this.#actionOutcomeUncertain = false;
+      return entries;
     } catch (error) {
       if (error instanceof SupabaseRelayError) throw error;
       return fail("LIST_FAILED");
@@ -390,6 +429,9 @@ export class SupabaseRelay implements HandoffRelay {
     name: GuardedActionName,
     targetId: string,
   ): Promise<void> {
+    if (this.#actionOutcomeUncertain) {
+      throw new SupabaseRelayError("ACTION_FAILED");
+    }
     return new Promise<void>((resolve, reject) => {
       this.#pendingActions.push({ action: name, reject, resolve, targetId });
       if (this.#actionBatchTimer) clearTimeout(this.#actionBatchTimer);
@@ -409,29 +451,51 @@ export class SupabaseRelay implements HandoffRelay {
     if (pending.length === 0) return;
 
     const send = async () => {
+      // A prior transport timeout has an unknown server-side outcome. Never
+      // send a dependent transition from this relay instance after that point;
+      // the caller must reload the authoritative Supabase state first.
+      if (this.#actionOutcomeUncertain) {
+        const relayError = new SupabaseRelayError("ACTION_FAILED");
+        pending.forEach(({ reject }) => reject(relayError));
+        return;
+      }
       try {
-        const response = await this.#fetch("/api/actions", {
-          body: JSON.stringify({
-            actions: pending.map(({ action, targetId }) => ({ action, targetId })),
-          }),
-          headers: { "Content-Type": "application/json" },
-          keepalive: true,
-          method: "POST",
-        });
-        if (!response.ok) {
-          const completedCount = await readCompletedActionCount(
-            response,
-            pending.length,
-          );
-          pending.slice(0, completedCount).forEach(({ resolve }) => resolve());
+        const result = await runActionRequestWithTimeout(
+          this.#fetch,
+          "/api/actions",
+          {
+            body: JSON.stringify({
+              actions: pending.map(({ action, targetId }) => ({ action, targetId })),
+            }),
+            headers: { "Content-Type": "application/json" },
+            keepalive: true,
+            method: "POST",
+          },
+          this.#actionTimeoutMs,
+          async (response) => {
+            if (response.ok) return { ok: true } as const;
+            return {
+              completedCount: await readCompletedActionCount(
+                response,
+                pending.length,
+              ),
+              ok: false,
+            } as const;
+          },
+        );
+        if (!result.ok) {
+          pending
+            .slice(0, result.completedCount)
+            .forEach(({ resolve }) => resolve());
           const relayError = new SupabaseRelayError("ACTION_FAILED");
           pending
-            .slice(completedCount)
+            .slice(result.completedCount)
             .forEach(({ reject }) => reject(relayError));
           return;
         }
         pending.forEach(({ resolve }) => resolve());
       } catch (error) {
+        this.#actionOutcomeUncertain = true;
         const relayError =
           error instanceof SupabaseRelayError
             ? error
@@ -444,7 +508,11 @@ export class SupabaseRelay implements HandoffRelay {
     this.#actionFlushChain = queued;
     await queued;
 
-    if (this.#pendingActions.length > 0 && !this.#actionBatchTimer) {
+    if (
+      !this.#actionOutcomeUncertain &&
+      this.#pendingActions.length > 0 &&
+      !this.#actionBatchTimer
+    ) {
       this.#actionBatchTimer = setTimeout(
         () => void this.#flushGuardedActions(),
         this.#actionBatchMs,

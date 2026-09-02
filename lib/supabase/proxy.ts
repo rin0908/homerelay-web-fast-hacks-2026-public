@@ -1,9 +1,24 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { createSupabaseAbortingFetch } from "@/lib/supabase/aborting-fetch";
 import { getSupabasePublicConfig } from "@/lib/supabase/env";
+import {
+  isHomeRelayAuthCookieName,
+  readSessionGuard,
+  SESSION_GUARD_COOKIE_NAME,
+  sessionGuardAllows,
+  sessionIdFromClaims,
+} from "@/lib/supabase/session-guard";
 
 const PUBLIC_PATHS = new Set(["/api/status", "/login", "/logout"]);
+const DEVICE_SESSION_PATH = "/login/device/session";
+
+type BufferedCookie = {
+  name: string;
+  options: CookieOptions;
+  value: string;
+};
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.has(pathname) || pathname.startsWith("/login/");
@@ -19,19 +34,89 @@ function makePrivate(response: NextResponse): NextResponse {
   return response;
 }
 
+function applyHeaders(
+  response: NextResponse,
+  headers: ReadonlyMap<string, string>,
+): void {
+  headers.forEach((value, name) => response.headers.set(name, value));
+}
+
+function applyBufferedCookies(
+  response: NextResponse,
+  cookies: readonly BufferedCookie[],
+): void {
+  cookies.forEach(({ name, options, value }) => {
+    response.cookies.set(name, value, options);
+  });
+}
+
+function homeRelayAuthCookieNames(
+  request: NextRequest,
+  supabaseUrl: string,
+  additionalNames: readonly string[] = [],
+): string[] {
+  const names = new Set([
+    ...request.cookies.getAll().map(({ name }) => name),
+    ...additionalNames,
+  ]);
+  return [...names].filter((name) =>
+    isHomeRelayAuthCookieName(name, supabaseUrl),
+  );
+}
+
+function clearHomeRelayAuthResponseCookies(
+  response: NextResponse,
+  names: readonly string[],
+): void {
+  names.forEach((name) => {
+    response.cookies.set(name, "", {
+      httpOnly: true,
+      maxAge: 0,
+      path: "/",
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
+  });
+}
+
 function redirectToLogin(
   request: NextRequest,
-  supabaseResponse: NextResponse,
+  cookies: readonly BufferedCookie[] = [],
+  headers: ReadonlyMap<string, string> = new Map(),
 ): NextResponse {
   const url = request.nextUrl.clone();
   url.pathname = "/login";
   url.search = "";
 
   const response = NextResponse.redirect(url);
-  supabaseResponse.cookies.getAll().forEach((cookie) => {
-    response.cookies.set(cookie);
-  });
+  applyBufferedCookies(response, cookies);
+  applyHeaders(response, headers);
+  return makePrivate(response);
+}
 
+function rejectedSessionResponse(
+  request: NextRequest,
+  supabaseUrl: string,
+  additionalCookieNames: readonly string[] = [],
+): NextResponse {
+  const names = homeRelayAuthCookieNames(
+    request,
+    supabaseUrl,
+    additionalCookieNames,
+  );
+  // NextResponse serializes its downstream request override at construction
+  // time, so mutate the request cookie jar before calling next().
+  names.forEach((name) => request.cookies.set(name, ""));
+  const response = isPublicPath(request.nextUrl.pathname)
+    ? NextResponse.next({ request })
+    : redirectToLogin(request);
+  // A password Server Action will emit the newly authenticated cookies on
+  // this same response. Its explicit success/failure path owns the browser
+  // mutation; Proxy only strips stale credentials from the downstream request
+  // to avoid an expiry/new-cookie header ordering race.
+  if (!(request.nextUrl.pathname === "/login" && request.method === "POST")) {
+    clearHomeRelayAuthResponseCookies(response, names);
+  }
   return makePrivate(response);
 }
 
@@ -39,41 +124,82 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   const config = getSupabasePublicConfig();
   if (!config) return NextResponse.next({ request });
 
-  let supabaseResponse = NextResponse.next({ request });
+  // This same-origin POST is the only bridge allowed to turn a freshly
+  // verified device session into an HttpOnly active guard. Its route performs
+  // the authoritative claims + membership check, so Proxy must leave the new
+  // Supabase cookies intact until that check runs.
+  if (
+    request.nextUrl.pathname === DEVICE_SESSION_PATH &&
+    request.method === "POST"
+  ) {
+    return makePrivate(NextResponse.next({ request }));
+  }
+
+  const guard = readSessionGuard(
+    request.cookies.get(SESSION_GUARD_COOKIE_NAME)?.value,
+  );
+  if (guard.state === "signed-out") {
+    return rejectedSessionResponse(request, config.url);
+  }
+
+  let pendingCookies: BufferedCookie[] = [];
+  const pendingHeaders = new Map<string, string>();
 
   const supabase = createServerClient(config.url, config.publishableKey, {
+    global: { fetch: createSupabaseAbortingFetch() },
     cookies: {
       getAll() {
         return request.cookies.getAll();
       },
       setAll(cookiesToSet, headers) {
-        cookiesToSet.forEach(({ name, value }) => {
-          request.cookies.set(name, value);
-        });
-
-        supabaseResponse = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, options, value }) => {
-          supabaseResponse.cookies.set(name, value, options);
-        });
+        // Do not expose a refresh response until its JWT session_id has been
+        // checked against the immutable request guard. In particular, Proxy
+        // never writes the guard cookie, so an older response cannot replace a
+        // later signed-out or newly active guard.
+        pendingCookies = cookiesToSet;
         Object.entries(headers).forEach(([name, value]) => {
-          supabaseResponse.headers.set(name, value);
+          pendingHeaders.set(name, value);
         });
       },
     },
   });
 
-  let authenticated = false;
+  let claims: Record<string, unknown> | null = null;
   try {
-    const { data, error } = await supabase.auth.getClaims();
-    authenticated =
-      !error && typeof data?.claims?.sub === "string" && data.claims.sub.length > 0;
+    const result = await supabase.auth.getClaims();
+    if (!result.error && result.data?.claims) {
+      claims = result.data.claims as Record<string, unknown>;
+    }
   } catch {
-    authenticated = false;
+    claims = null;
   }
 
-  if (!authenticated && !isPublicPath(request.nextUrl.pathname)) {
-    return redirectToLogin(request, supabaseResponse);
+  const authenticated =
+    typeof claims?.sub === "string" && claims.sub.length > 0;
+  const guardAllowsCurrentSession = await sessionGuardAllows(
+    guard,
+    sessionIdFromClaims(claims),
+  );
+
+  if (!authenticated || !guardAllowsCurrentSession) {
+    if (guard.state === "active") {
+      return rejectedSessionResponse(
+        request,
+        config.url,
+        pendingCookies.map(({ name }) => name),
+      );
+    }
+
+    // Legacy (guard-absent) sessions retain the existing compatibility path.
+    // Cookie removals emitted by Supabase still reach the browser.
+    if (!isPublicPath(request.nextUrl.pathname)) {
+      return redirectToLogin(request, pendingCookies, pendingHeaders);
+    }
   }
 
-  return makePrivate(supabaseResponse);
+  pendingCookies.forEach(({ name, value }) => request.cookies.set(name, value));
+  const response = NextResponse.next({ request });
+  applyBufferedCookies(response, pendingCookies);
+  applyHeaders(response, pendingHeaders);
+  return makePrivate(response);
 }

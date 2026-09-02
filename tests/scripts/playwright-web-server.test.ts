@@ -27,6 +27,7 @@ describe("synthetic Playwright server isolation", () => {
       HOMERELAY_DATA_MODE: "supabase",
       HOMERELAY_DEMO_MODE: "false",
       HOMERELAY_E2E_ISOLATE_VENDORS: "false",
+      HOMERELAY_E2E_LIVE: " FALSE ",
       HOMERELAY_OPENAI_VERIFY: "true",
     };
 
@@ -45,7 +46,7 @@ describe("synthetic Playwright server isolation", () => {
       HOMERELAY_DATA_MODE: "supabase",
       HOMERELAY_DEMO_MODE: "false",
       HOMERELAY_E2E_ISOLATE_VENDORS: "true",
-      HOMERELAY_E2E_LIVE: "true",
+      HOMERELAY_E2E_LIVE: " TRUE ",
       HOMERELAY_OPENAI_VERIFY: "true",
     };
 
@@ -57,6 +58,22 @@ describe("synthetic Playwright server isolation", () => {
       HOMERELAY_E2E_ISOLATE_VENDORS: "true",
       HOMERELAY_OPENAI_VERIFY: "false",
     });
+  });
+
+  it("normalizes the live opt-in at every Playwright entry point", async () => {
+    const sources = await Promise.all(
+      [
+        "playwright.config.ts",
+        "scripts/playwright-global-teardown.mjs",
+        "tests/e2e/live-flow.spec.ts",
+      ].map((file) => readFile(resolve(process.cwd(), file), "utf8")),
+    );
+
+    for (const source of sources) {
+      expect(source).toContain(
+        'HOMERELAY_E2E_LIVE?.trim().toLowerCase() === "true"',
+      );
+    }
   });
 
   it("never reuses a server that may have live credentials loaded", async () => {

@@ -1,4 +1,5 @@
-const liveE2e = process.env.HOMERELAY_E2E_LIVE === "true";
+const liveE2e =
+  process.env.HOMERELAY_E2E_LIVE?.trim().toLowerCase() === "true";
 const controlPort = (liveE2e ? 3101 : 3100) + 100;
 
 export default async function globalTeardown() {

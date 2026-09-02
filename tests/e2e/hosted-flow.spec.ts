@@ -9,6 +9,11 @@ import {
   type Page,
 } from "@playwright/test";
 
+import {
+  readVendorJson,
+  TransientVendorReadbackError,
+} from "./vendor-readback";
+
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PREVIEW_HOST_PATTERN =
@@ -47,12 +52,8 @@ function fail(code: string): never {
   throw new Error(`Hosted E2E refused: ${code}`);
 }
 
-class TransientVendorReadbackError extends Error {}
-
 function transientVendorReadback(code: string): never {
-  throw new TransientVendorReadbackError(
-    `Hosted E2E transient read-back failure: ${code}`,
-  );
+  throw new TransientVendorReadbackError(code);
 }
 
 function isTransientVendorStatus(status: number): boolean {
@@ -466,7 +467,7 @@ async function qdrantFixturePointCount(
     }
     return fail("qdrant_readback_failed");
   }
-  const value: unknown = await response.json().catch(() => null);
+  const value = await readVendorJson(response, "qdrant_response_read_failed");
   if (!value || typeof value !== "object" || !("result" in value)) {
     return fail("qdrant_readback_invalid");
   }
@@ -511,7 +512,7 @@ async function neo4jFixtureCounts(
     }
     return fail("neo4j_readback_failed");
   }
-  const value: unknown = await response.json().catch(() => null);
+  const value = await readVendorJson(response, "neo4j_response_read_failed");
   if (!value || typeof value !== "object" || !("data" in value)) {
     return fail("neo4j_readback_invalid");
   }

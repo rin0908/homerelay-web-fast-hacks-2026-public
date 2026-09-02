@@ -13,14 +13,17 @@ vi.mock("@/lib/supabase/server", () => ({
 import { getCurrentSession } from "@/lib/supabase/session";
 
 type ClientSetup = {
-  claims?: { sub?: string } | null;
+  claims?: { session_id?: string; sub?: string } | null;
   claimsError?: Error | null;
   databaseError?: Error | null;
   member?: Record<string, unknown> | null;
 };
 
 function clientSetup({
-  claims = { sub: "synthetic-auth-user" },
+  claims = {
+    session_id: "11111111-1111-4111-8111-111111111111",
+    sub: "synthetic-auth-user",
+  },
   claimsError = null,
   databaseError = null,
   member = {
@@ -72,6 +75,7 @@ describe("HomeRelay Supabase session", () => {
         id: "synthetic-member",
         role: "family",
       },
+      sessionId: "11111111-1111-4111-8111-111111111111",
       userId: "synthetic-auth-user",
     });
     expect(setup.getClaims).toHaveBeenCalledOnce();
