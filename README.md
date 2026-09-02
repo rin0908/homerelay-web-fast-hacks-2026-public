@@ -186,6 +186,16 @@ HOMERELAY_CLOUD_FOREIGN_FAMILY_EMAIL / HOMERELAY_CLOUD_FOREIGN_FAMILY_PASSWORD
 
 同じHomeRelayクラウドSupabaseへ接続したHTTPSデプロイを両端末で開きます。iPhoneでは最初にSafariの共有ボタンから`ホーム画面に追加`を選び、以後はHomeRelayアイコンから起動します。これにより通常のSafari URLバーを表示せず、同じ画面内でカメラとマイクを使えます。初回だけiOSのカメラ／マイク許可は必要で、このOS表示は隠しません。PCは家族、iPhoneはヘルパーでログインし、上記と同じ導線を実施します。確認前の非共有と、`次の人へ`後のRealtime反映を実機で確認してください。
 
+#### 2026-09-02 実機受入結果
+
+保護されたPRIVATE Vercel Previewで、実iPhoneのHome Screen版を訪問ヘルパー、別Windows PCを家族として使用しました。固定`新しく伝える`CTAから1回の操作でカメラを開き、写真、音声、OpenAI live下書き、本人確認前の非共有、確認後のSupabase保存、WindowsへのRealtime反映、`見ました`→`私がやります`→`できました`、`買います`→`買いました`、Qdrant候補表示までを確認しました。Windowsの最新カードは10秒以内に表示され、5操作の主観的な反応は「普通（許容）」でした。
+
+Windowsストップウォッチで、iPhoneの固定CTAタップからWindowsの`買いました`反映までを連続して計測し、60秒と56秒で2回成功しました。ログイン、Vercel保護通過、Home Screen追加、初回のOS権限許可は事前準備として計測外です。56秒の合成速度試験では、安全な写真と発話した必要品が意味的に一致していないため、写真・音声・共有の導線証拠ではありますが、写真内容と本文の一致を示す品質証拠には使用しません。
+
+cleanup直前のserver-side read-backでは、最新entryの3対応と購入完了、Qdrantの最新handoff／必要品1件と別世帯0件、Neo4jの`done`／7 relationshipsと別世帯0件を確認しました。その後、固定台帳の合成fixtureだけを一度cleanupし、直後と2秒後の2回とも、Auth users、5 public tables、Storage objects、Qdrant fixture points、Neo4j fixture nodes／relationshipsがすべて0件でした。ローカルの3つの一時合成パスワードと一度限りログインQRも削除済みです。
+
+この受入後の最終ローカル検証は、lint、typecheck、集中22/22 tests、全unit 56 files / 434 tests、synthetic E2E 16/16（live-only 2件はfixture cleanup後の再生成を避けるため意図的skip）、production build、privacy／reachable-history secret scan、production dependency audit 0件、`git diff --check`がPASSしました。
+
 締めの言葉: 「HomeRelayは監視ではありません。写真と声だけで、次の人へ温かくバトンを渡すWebアプリです。」
 
 ## 検証
@@ -245,7 +255,7 @@ Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY_AUDIO
 
 対応・購入の5操作は、タップ時に短い状態表示とともに即時反映し、認証付きのguarded RPCを順序どおり一括送信します。送信中のRealtime表示は保留してSupabase正本を最後に読み戻し、失敗時は楽観表示を戻して警告します。別batchも直列送信し、画面離脱時はpending actionを`keepalive`でflushします。Neo4j派生graphには`買います`と`買いました`の両イベントを残し、アクセス権限は引き続きSupabaseだけで判定します。
 
-このcheckpointではlint、typecheck、56 files / 434 unit tests、16 synthetic E2E（live-only 2件は意図的skip）、Next.js 16.3.3 production build、privacy audit、production dependency audit、`git diff --check`がPASSしました。privacy auditは190公開候補ファイル、到達可能Git履歴、41 browser配信ファイルを検査し、private media、credential pattern、runtime content log、server-secret markerを検出していません。新しいstandalone起動と即時操作は自動検証済みで、更新後Previewに対するiPhone＋Windowsの物理再試験が次のgateです。
+このcheckpointではlint、typecheck、56 files / 434 unit tests、16 synthetic E2E（live-only 2件は意図的skip）、Next.js 16.3.3 production build、privacy audit、production dependency audit、`git diff --check`がPASSしました。privacy auditは190公開候補ファイル、到達可能Git履歴、41 browser配信ファイルを検査し、private media、credential pattern、runtime content log、server-secret markerを検出していません。更新後PRIVATE Previewでもstandalone起動、固定CTA、即時操作、iPhone＋Windowsの中心導線を物理確認し、60秒と56秒の2回連続成功まで完了しました。
 
 ### Qdrant / Neo4j live検証（2026-08-30）
 
