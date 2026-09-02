@@ -74,6 +74,17 @@ function jsonError(message: string, status: number) {
   );
 }
 
+function jsonActionError(
+  message: string,
+  status: number,
+  completedCount: number,
+) {
+  return NextResponse.json(
+    { completedCount, error: message },
+    { status, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 function databaseErrorStatus(error: { code?: string }) {
   if (error.code === "42501") return 403;
   if (error.code === "P0001") return 409;
@@ -120,20 +131,26 @@ async function postAction(request: Request) {
     string,
     Array<{ action: PurchaseAction; occurredAt: string }>
   >();
+  let completedCount = 0;
+  let failureStatus: number | null = null;
   for (const input of inputs) {
     const graphAction = isEntryAction(input.action)
       ? ENTRY_GRAPH_ACTION[input.action]
       : null;
     const parameterName = graphAction ? "p_entry_id" : "p_item_id";
-    const { error } = await supabase.rpc(input.action, {
-      [parameterName]: input.targetId,
-    });
-    if (error) {
-      return jsonError(
-        "操作を完了できませんでした",
-        databaseErrorStatus(error),
-      );
+    try {
+      const { error } = await supabase.rpc(input.action, {
+        [parameterName]: input.targetId,
+      });
+      if (error) {
+        failureStatus = databaseErrorStatus(error);
+        break;
+      }
+    } catch {
+      failureStatus = 502;
+      break;
     }
+    completedCount += 1;
 
     if (!integration.neo4j.active) continue;
     if (isEntryAction(input.action)) {
@@ -194,6 +211,14 @@ async function postAction(request: Request) {
         // Optional graph projection can never change the successful RPC result.
       }
     }
+  }
+
+  if (failureStatus !== null) {
+    return jsonActionError(
+      "操作を完了できませんでした",
+      failureStatus,
+      completedCount,
+    );
   }
 
   return new Response(null, {

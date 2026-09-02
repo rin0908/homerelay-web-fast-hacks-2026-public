@@ -123,11 +123,10 @@ async function postDraft(request: Request) {
     return NextResponse.json({ error: "録音時間を確認できません" }, { status: 400 });
   }
   const durationMs = Number(durationValue);
-  if (
-    !Number.isSafeInteger(durationMs) ||
-    durationMs < 1 ||
-    durationMs > MAX_AUDIO_DURATION_MS
-  ) {
+  if (!Number.isSafeInteger(durationMs) || durationMs < 1) {
+    return NextResponse.json({ error: "録音時間を確認できません" }, { status: 400 });
+  }
+  if (durationMs > MAX_AUDIO_DURATION_MS) {
     return NextResponse.json({ error: "音声が長すぎます" }, { status: 413 });
   }
 

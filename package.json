@@ -19,7 +19,7 @@
     "test:e2e": "playwright test",
     "test:e2e:live": "playwright test tests/e2e/live-flow.spec.ts --project=desktop-1280",
     "test:e2e:hosted": "node --env-file-if-exists=.env.local node_modules/@playwright/test/cli.js test --config=playwright.hosted.config.ts",
-    "verify:openai": "node scripts/verify-openai.mjs",
+    "verify:openai": "node --env-file-if-exists=.env.local scripts/verify-openai.mjs",
     "qdrant:bootstrap": "node --env-file-if-exists=.env.local scripts/bootstrap-qdrant.mjs",
     "verify:qdrant": "node --env-file-if-exists=.env.local scripts/verify-qdrant.mjs",
     "neo4j:bootstrap": "node --env-file-if-exists=.env.local scripts/bootstrap-neo4j.mjs",

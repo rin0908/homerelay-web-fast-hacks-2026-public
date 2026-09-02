@@ -23,6 +23,11 @@ async function expectNoSeriousAccessibilityViolations(page: Page) {
   expect(serious).toEqual([]);
 }
 
+function isMobileViewport(page: Page): boolean {
+  const viewport = page.viewportSize();
+  return viewport !== null && viewport.width < 1024;
+}
+
 test("serves security headers without framework disclosure", async ({ request }) => {
   for (const route of ["/", "/record", "/api/status"]) {
     const response = await request.get(route);
@@ -44,10 +49,9 @@ test("warm home shell is complete and responsive", async ({ page }, testInfo) =>
   await page.goto("/");
   await expect(page).toHaveTitle(/HomeRelay/);
   await expect(page.getByRole("heading", { name: "今日の様子", level: 1 })).toBeVisible();
-  const visibleCameraLink =
-    (page.viewportSize()?.width ?? 0) < 1024
-      ? page.getByTestId("mobile-record-cta")
-      : page.getByRole("link", { name: "カメラを開く", exact: true });
+  const visibleCameraLink = isMobileViewport(page)
+    ? page.getByTestId("mobile-record-cta")
+    : page.getByRole("link", { name: "カメラを開く", exact: true });
   await expect(visibleCameraLink).toBeVisible();
   await expect(page.getByText("ご家族", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("ご親族", { exact: true })).toBeVisible();
@@ -57,7 +61,7 @@ test("warm home shell is complete and responsive", async ({ page }, testInfo) =>
   await expect(page.getByText("合成候補（Qdrant未接続）")).toBeVisible();
 
   const mobileRecordCta = page.getByTestId("mobile-record-cta");
-  if ((page.viewportSize()?.width ?? 0) < 1024) {
+  if (isMobileViewport(page)) {
     await expect(mobileRecordCta).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await expect(mobileRecordCta).toBeVisible();
@@ -84,10 +88,9 @@ test("warm home shell is complete and responsive", async ({ page }, testInfo) =>
 
 test("home camera CTA starts the in-page camera without a duplicate start tap", async ({ page }) => {
   await page.goto("/");
-  const cameraLink =
-    (page.viewportSize()?.width ?? 0) < 1024
-      ? page.getByTestId("mobile-record-cta")
-      : page.getByRole("link", { name: "カメラを開く", exact: true });
+  const cameraLink = isMobileViewport(page)
+    ? page.getByTestId("mobile-record-cta")
+    : page.getByRole("link", { name: "カメラを開く", exact: true });
 
   await expect(cameraLink).toHaveAttribute("href", "/record?camera=1");
   await cameraLink.click();

@@ -153,6 +153,39 @@ describe("OpenAI live verifier", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("rejects a non-WAV fixture without reading or fetching it", async () => {
+    const files = fileDependencies();
+    const fetchImpl = vi.fn();
+
+    await expect(
+      verifier.verifyOpenAI({
+        ...files,
+        environment: environment({
+          HOMERELAY_OPENAI_VERIFY_AUDIO: "synthetic-handoff.mp3",
+        }),
+        fetchImpl,
+      }),
+    ).rejects.toThrow("SYNTHETIC_AUDIO_FORMAT_INVALID");
+
+    expect(files.readFileImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("rejects a success response whose cache policy is not exactly no-store", async () => {
+    await expect(
+      verifier.verifyOpenAI({
+        ...fileDependencies(),
+        environment: environment(),
+        fetchImpl: vi.fn().mockResolvedValue(
+          new Response(JSON.stringify(SYNTHETIC_RESULT), {
+            headers: { "Cache-Control": "no-cache" },
+            status: 200,
+          }),
+        ),
+      }),
+    ).rejects.toThrow("CACHE_POLICY_INVALID");
+  });
+
   it("classifies invalid success JSON without printing its body", async () => {
     await expect(
       verifier.verifyOpenAI({

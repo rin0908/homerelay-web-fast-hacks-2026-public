@@ -92,6 +92,32 @@ type PendingGuardedAction = {
   targetId: string;
 };
 
+function completedActionCount(payload: unknown, batchSize: number): number {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    !("completedCount" in payload) ||
+    !Number.isInteger(payload.completedCount) ||
+    Number(payload.completedCount) < 0 ||
+    Number(payload.completedCount) > batchSize
+  ) {
+    return 0;
+  }
+
+  return Number(payload.completedCount);
+}
+
+async function readCompletedActionCount(
+  response: Response,
+  batchSize: number,
+): Promise<number> {
+  try {
+    return completedActionCount(await response.json(), batchSize);
+  } catch {
+    return 0;
+  }
+}
+
 export type SupabaseRelayErrorCode =
   | "LIST_FAILED"
   | "PUBLISH_FAILED"
@@ -392,7 +418,18 @@ export class SupabaseRelay implements HandoffRelay {
           keepalive: true,
           method: "POST",
         });
-        if (!response.ok) return fail("ACTION_FAILED");
+        if (!response.ok) {
+          const completedCount = await readCompletedActionCount(
+            response,
+            pending.length,
+          );
+          pending.slice(0, completedCount).forEach(({ resolve }) => resolve());
+          const relayError = new SupabaseRelayError("ACTION_FAILED");
+          pending
+            .slice(completedCount)
+            .forEach(({ reject }) => reject(relayError));
+          return;
+        }
         pending.forEach(({ resolve }) => resolve());
       } catch (error) {
         const relayError =

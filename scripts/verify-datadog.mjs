@@ -40,7 +40,12 @@ function timeoutMs(value) {
 }
 
 export function safeDatadogConfiguration(environment = process.env) {
-  const apiKey = environment.DD_API_KEY?.trim();
+  const canonicalApiKey = environment.DD_API_KEY?.trim() ?? "";
+  const legacyApiKey = environment.DATADOG_API_KEY?.trim() ?? "";
+  if (canonicalApiKey && legacyApiKey && canonicalApiKey !== legacyApiKey) {
+    throw new Error("DD_API_KEY_CONFLICT");
+  }
+  const apiKey = canonicalApiKey || legacyApiKey;
   if (!apiKey) return null;
 
   const forcedDemo =

@@ -14,6 +14,29 @@ type MemberRow = {
   role: unknown;
 };
 
+const DEVICE_LOGIN_TIMEOUT_MS = 15_000;
+const DEVICE_LOGIN_TIMEOUT = Symbol("device_login_timeout");
+
+async function withDeviceLoginTimeout<T>(
+  operation: PromiseLike<T>,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      Promise.resolve(operation),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(DEVICE_LOGIN_TIMEOUT),
+          DEVICE_LOGIN_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function tokenFromHash(hash: string): string | null {
   if (!hash.startsWith("#") || hash.length > 1_024) return null;
 
@@ -76,7 +99,7 @@ async function rejectAfterLocalSignOut(
   return (await localSignOut(supabase)) ? outcome : "unavailable";
 }
 
-export async function consumeDeviceMagicLink(
+async function authenticateDeviceMagicLink(
   supabase: SupabaseClient,
   hash: string,
   expectedRole: DeviceLoginRole,
@@ -86,40 +109,77 @@ export async function consumeDeviceMagicLink(
     return rejectAfterLocalSignOut(supabase, "invalid");
   }
 
+  const verificationOperation = supabase.auth.verifyOtp({
+    token_hash: tokenHash,
+    type: "magiclink",
+  });
+  let verification: Awaited<typeof verificationOperation>;
   try {
-    const verification = await supabase.auth.verifyOtp({
-      token_hash: tokenHash,
-      type: "magiclink",
-    });
-    if (verification.error) {
-      return rejectAfterLocalSignOut(supabase, "invalid");
+    verification = await withDeviceLoginTimeout(verificationOperation);
+  } catch (error) {
+    if (error === DEVICE_LOGIN_TIMEOUT) {
+      // verifyOtp may persist a session after our timeout because Auth does
+      // not expose a per-call AbortSignal. Remove that late session as soon
+      // as the original request settles.
+      void verificationOperation.then(
+        () => localSignOut(supabase),
+        () => localSignOut(supabase),
+      );
     }
+    throw error;
+  }
+  if (verification.error) {
+    return rejectAfterLocalSignOut(supabase, "invalid");
+  }
 
-    const claims = await supabase.auth.getClaims();
-    const authUserId = claims.data?.claims?.sub;
-    if (claims.error || typeof authUserId !== "string" || !authUserId) {
-      return rejectAfterLocalSignOut(supabase, "membership");
+  const claims = await withDeviceLoginTimeout(supabase.auth.getClaims());
+  const authUserId = claims.data?.claims?.sub;
+  if (claims.error || typeof authUserId !== "string" || !authUserId) {
+    return rejectAfterLocalSignOut(supabase, "membership");
+  }
+
+  const membershipOperation = supabase
+    .from("members")
+    .select("id, auth_user_id, role")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+  const membership = await withDeviceLoginTimeout(membershipOperation);
+  const member = membership.data as MemberRow | null;
+  if (
+    membership.error ||
+    !member ||
+    typeof member.id !== "string" ||
+    member.auth_user_id !== authUserId ||
+    member.role !== expectedRole
+  ) {
+    return rejectAfterLocalSignOut(supabase, "membership");
+  }
+
+  return "success";
+}
+
+export async function consumeDeviceMagicLink(
+  supabase: SupabaseClient,
+  hash: string,
+  expectedRole: DeviceLoginRole,
+): Promise<DeviceLoginOutcome> {
+  const authentication = authenticateDeviceMagicLink(
+    supabase,
+    hash,
+    expectedRole,
+  );
+
+  try {
+    return await authentication;
+  } catch (error) {
+    if (error === DEVICE_LOGIN_TIMEOUT) {
+      // Claims and membership timeouts happen after verification has created
+      // a session; verification timeouts also need an immediate best-effort
+      // clear in addition to the late-settlement cleanup above.
+      void localSignOut(supabase);
+    } else {
+      await localSignOut(supabase);
     }
-
-    const membership = await supabase
-      .from("members")
-      .select("id, auth_user_id, role")
-      .eq("auth_user_id", authUserId)
-      .maybeSingle();
-    const member = membership.data as MemberRow | null;
-    if (
-      membership.error ||
-      !member ||
-      typeof member.id !== "string" ||
-      member.auth_user_id !== authUserId ||
-      member.role !== expectedRole
-    ) {
-      return rejectAfterLocalSignOut(supabase, "membership");
-    }
-
-    return "success";
-  } catch {
-    await localSignOut(supabase);
     return "unavailable";
   }
 }

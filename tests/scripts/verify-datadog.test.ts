@@ -62,6 +62,42 @@ describe("Datadog live verifier", () => {
     }
   });
 
+  it("accepts the legacy API-key name with the canonical precedence rules", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ status: 202 });
+
+    await expect(
+      verifier.verifyDatadog({
+        environment: liveEnvironment({
+          DATADOG_API_KEY: API_KEY,
+          DD_API_KEY: "",
+        }),
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ status: "accepted" });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({ "DD-API-KEY": API_KEY }),
+      }),
+    );
+  });
+
+  it("rejects conflicting canonical and legacy API keys before fetching", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(
+      verifier.verifyDatadog({
+        environment: liveEnvironment({
+          DATADOG_API_KEY: "b".repeat(32),
+        }),
+        fetchImpl,
+      }),
+    ).rejects.toThrow("DD_API_KEY_CONFLICT");
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("submits fixed synthetic success/failure counters and duration with one safe UI marker", async () => {
     const bodyReader = vi.fn();
     const fetchImpl = vi.fn().mockResolvedValue({

@@ -2,6 +2,8 @@
 
 写真と声だけで家族向けの申し送りを作り、本人が確認した内容だけを次の人へ渡す、スマートフォン優先のWebアプリです。対象は招待されたご家族・ご親族・訪問ヘルパーです。合成データだけで動かしてください。
 
+公開ソースは[rin0908/homerelay-web-fast-hacks-2026-public](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public)です。公開前に到達可能なGit履歴の個人メールをGitHub noreplyへ置換し、旧SHAや秘密情報を含まない新規PUBLIC repositoryとして作成しました。作業PRは[#1](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1)で、`main`へはまだmergeしていません。
+
 ## すぐ動かす（合成デモ）
 
 Node.js 22以降を用意し、リポジトリ直下で実行します。
@@ -257,6 +259,12 @@ Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY_AUDIO
 
 このcheckpointではlint、typecheck、56 files / 434 unit tests、16 synthetic E2E（live-only 2件は意図的skip）、Next.js 16.3.3 production build、privacy audit、production dependency audit、`git diff --check`がPASSしました。privacy auditは190公開候補ファイル、到達可能Git履歴、41 browser配信ファイルを検査し、private media、credential pattern、runtime content log、server-secret markerを検出していません。更新後PRIVATE Previewでもstandalone起動、固定CTA、即時操作、iPhone＋Windowsの中心導線を物理確認し、60秒と56秒の2回連続成功まで完了しました。
 
+### CodeRabbit実レビュー（2026-09-02）
+
+新しいPUBLIC repositoryだけにCodeRabbitを接続し、PR #1の`b9e56a5813b0116d08eb88e992fede66c9c2f336`へ手動のfull reviewを実行しました。CodeRabbitはレビュー完了を返し、23件のactionable commentを取得しました。20件はコード／テスト／文書で修正し、1件は既存の`afterEach`で既に保護済み、1件はSupabase専用E2Eからvendor隔離を外して課金・残存データを発生させ得るため却下、1件は単一serverless runtime内のrate limitという既知の防御層として受容しました。
+
+修正後はlint、typecheck、58 files / 457 unit tests、16/16 synthetic E2E（live-only 2件はfixture cleanup後のため意図的skip）、production build、194公開候補ファイルと41 browser配信ファイルのprivacy／secret監査、production dependency audit、`git diff --check`がPASSしています。実iPhone＋Windowsの60秒／56秒証拠はレビュー前Previewで取得したため、修正後Previewへの再deployは未実施です。PRはOPEN・未mergeで、増分レビュー結果は修正branchのpush後に追記します。
+
 ### Qdrant / Neo4j live検証（2026-08-30）
 
 Qdrant Cloud Freeの`homerelay-qdrant`はHealthyです。collection bootstrap後、Cloud Inferenceによる類似申し送りと必要品の検索、別世帯filter、検証pointの削除と0件read-backがliveでPASSしました。
@@ -287,7 +295,7 @@ loopback検証に必要な`HOMERELAY_TEST_*`と`HOMERELAY_E2E_*`は、[HomeRelay
 - Qdrant: **Qdrant Cloud Freeへ実接続済み・live検証PASS**。`homerelay-qdrant`のHealthy、bootstrap、Cloud Inferenceの類似申し送り／必要品、別世帯filter、検証point削除後0件を確認しました。
 - Neo4j: **AuraDB Freeへ実接続済み・live検証PASS**。`homerelay-graph`のRunning、5 constraints、Home／foreign graphのparameterized write、関係read-back、Home filterでforeign 0件、両世帯cleanup後node／relationship各0件を確認しました。2026 Auraのusername／database形式にも対応済みです。
 - Datadog: verifierとserver-only numeric metricsは実装済みですが、AP1 Japanの認証コード送信／再送信が2つの異なるメールでDatadog側の「不明なエラー」になりました。API key未作成・未保存、live未実行のため**未接続・未使用**です。同じ登録操作は繰り返さず、他工程後に1回だけ再試行します。
-- CodeRabbit: 正しいPRIVATE HomeRelay repositoryだけへGitHub Appを接続しPR #1でトリガー済みですが、PRIVATE repositoryのFree plan制限でレビューは実行されませんでした。指摘0件ではなくレビュー未実施であり、使用済みとは扱いません。有料化、trial開始、merge、公開化は行っていません。
+- CodeRabbit: 新しいPUBLIC HomeRelay repositoryだけに接続し、PR #1で実full reviewを完了したため**使用済み**です。初回23件を取得し、20件を修正、既存保護済み1件・安全設計上却下1件・受容した構成上の制限1件を根拠付きで分類しました。修正branchの増分レビューはpush後に行い、PRはまだmergeしません。
 - HackerSquad: builder loginは成功しましたが、対象イベントがArchivedで提出ボタン／project導線がなく、project作成・提出は未実行です。提出済み・使用済みとは扱いません。
 
 詳細な目的、実装ファイル、検証、デモ箇所、必要資格情報は[SPONSOR_TOOL_EVIDENCE.md](SPONSOR_TOOL_EVIDENCE.md)にあります。

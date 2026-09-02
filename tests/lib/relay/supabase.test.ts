@@ -265,7 +265,7 @@ describe("SupabaseRelay", () => {
     expect(harness.rpc).not.toHaveBeenCalled();
   });
 
-  it("batches rapid guarded transitions into one keepalive request", async () => {
+  it("batches guarded transitions after the configured delay", async () => {
     vi.useFakeTimers();
     const harness = createHarness();
     const fetchMock = vi
@@ -282,9 +282,10 @@ describe("SupabaseRelay", () => {
       relay.claimEntry(entryId),
       relay.completeEntry(entryId),
       relay.claimItem(itemId),
-      relay.completeItem(itemId),
     ];
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(649);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     await Promise.all(pending);
 
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -294,14 +295,37 @@ describe("SupabaseRelay", () => {
         { action: "claim_entry", targetId: entryId },
         { action: "complete_entry", targetId: entryId },
         { action: "claim_needed_item", targetId: itemId },
-        { action: "complete_needed_item", targetId: itemId },
       ],
     });
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       keepalive: true,
       method: "POST",
     });
-    vi.useRealTimers();
+  });
+
+  it("flushes a purchase completion batch immediately", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 650, fetch: fetchMock },
+    );
+
+    const pending = [relay.claimItem(itemId), relay.completeItem(itemId)];
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.all(pending);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      actions: [
+        { action: "claim_needed_item", targetId: itemId },
+        { action: "complete_needed_item", targetId: itemId },
+      ],
+    });
   });
 
   it("rejects every queued transition when a batched request fails", async () => {
@@ -329,6 +353,41 @@ describe("SupabaseRelay", () => {
     expect(results.every((result) => result.status === "rejected")).toBe(true);
     for (const result of results) {
       if (result.status === "rejected") {
+        expect(result.reason).toMatchObject({ code: "ACTION_FAILED" });
+      }
+    }
+  });
+
+  it("resolves the successful prefix of a partially completed batch", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        { completedCount: 1, error: "synthetic guarded failure" },
+        { status: 409 },
+      ),
+    );
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 650, fetch: fetchMock },
+    );
+
+    const settled = Promise.allSettled([
+      relay.acknowledge(entryId),
+      relay.claimEntry(entryId),
+      relay.completeEntry(entryId),
+    ]);
+    await vi.advanceTimersByTimeAsync(650);
+
+    const results = await settled;
+    expect(results.map(({ status }) => status)).toEqual([
+      "fulfilled",
+      "rejected",
+      "rejected",
+    ]);
+    for (const result of results.slice(1)) {
+      if (result?.status === "rejected") {
         expect(result.reason).toMatchObject({ code: "ACTION_FAILED" });
       }
     }

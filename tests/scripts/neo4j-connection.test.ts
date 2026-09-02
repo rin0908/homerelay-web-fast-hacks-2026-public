@@ -55,6 +55,25 @@ describe("Neo4j script connection rules", () => {
     ).toBe("neo4j");
   });
 
+  it.each([
+    [
+      {
+        HOMERELAY_DATA_MODE: "supabase",
+        HOMERELAY_DEMO_MODE: "false",
+      },
+      true,
+    ],
+    [
+      {
+        HOMERELAY_DATA_MODE: "supabase",
+        HOMERELAY_DEMO_MODE: "true",
+      },
+      false,
+    ],
+  ])("resolves live mode for %o", (environment, expected) => {
+    expect(connection.isNeo4jLiveMode(environment)).toBe(expected);
+  });
+
   it("disables live scripts when E2E vendor isolation is enabled", () => {
     expect(
       connection.isNeo4jLiveMode({

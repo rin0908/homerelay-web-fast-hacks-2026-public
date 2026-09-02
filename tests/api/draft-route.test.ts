@@ -207,6 +207,7 @@ describe("POST /api/draft", () => {
 
   it.each([
     ["missing", null, 400, "録音時間を確認できません"],
+    ["zero", "0", 400, "録音時間を確認できません"],
     ["too long", "30001", 413, "音声が長すぎます"],
   ])("rejects %s declared audio duration", async (_label, durationMs, status, error) => {
     const response = await POST(

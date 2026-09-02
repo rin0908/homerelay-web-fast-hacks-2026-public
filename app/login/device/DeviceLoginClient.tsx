@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   consumeDeviceMagicLink,
@@ -14,11 +14,11 @@ let capturedHash = "";
 if (typeof window !== "undefined") {
   capturedHash = window.location.hash;
   if (capturedHash) {
-    const cleanPath =
-      window.location.pathname === "/login/device/family"
-        ? "/login/device/family"
-        : "/login/device";
-    window.history.replaceState(null, "", cleanPath);
+    window.history.replaceState(
+      null,
+      "",
+      window.location.pathname + window.location.search,
+    );
   }
 }
 
@@ -39,17 +39,24 @@ export function DeviceLoginClient({
   const [outcome, setOutcome] = useState<
     Exclude<DeviceLoginOutcome, "success"> | "checking"
   >("checking");
+  const authenticationRef = useRef<Promise<DeviceLoginOutcome> | null>(null);
 
   useEffect(() => {
-    const hash = capturedHash;
-    capturedHash = "";
     let active = true;
 
-    async function authenticate() {
+    if (!authenticationRef.current) {
+      const hash = capturedHash;
+      capturedHash = "";
       const supabase = createClient();
-      const result = supabase
-        ? await consumeDeviceMagicLink(supabase, hash, expectedRole)
-        : "unavailable";
+      authenticationRef.current = supabase
+        ? consumeDeviceMagicLink(supabase, hash, expectedRole)
+        : Promise.resolve("unavailable");
+    }
+
+    const authentication = authenticationRef.current;
+
+    async function authenticate() {
+      const result = await authentication;
       if (!active) return;
       if (result === "success") {
         window.location.replace("/");

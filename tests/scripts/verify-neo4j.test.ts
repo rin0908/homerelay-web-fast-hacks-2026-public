@@ -217,13 +217,16 @@ describe("Neo4j live verifier isolation and cleanup", () => {
   it("fails the verification if a foreign relationship crosses the home scope", async () => {
     const results = successResults();
     results[3] = { fields: ["foreignRelationCount"], values: [[1]] };
+    const executor = sequentialExecutor(results);
 
     await expect(
-      verifier.verifyNeo4jExecutor(sequentialExecutor(results), {
+      verifier.verifyNeo4jExecutor(executor, {
         logger: safeLogger(),
         randomUuid: deterministicIds(),
       }),
     ).rejects.toThrow("FOREIGN_HOUSEHOLD_SCOPE_FAILED");
+
+    expect(callsContaining(executor, "DETACH DELETE")).toHaveLength(2);
   });
 
   it.each([

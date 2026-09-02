@@ -198,4 +198,37 @@ describe("Qdrant live verifier cleanup", () => {
     expect(output).not.toContain(secret);
     expect(output).not.toContain("vendor rejected");
   });
+
+  it.each([
+    {
+      HOMERELAY_DATA_MODE: "supabase",
+      HOMERELAY_DEMO_MODE: "true",
+      QDRANT_API_KEY: "synthetic-qdrant-key",
+      QDRANT_URL: CONFIG.url,
+    },
+    {
+      HOMERELAY_DATA_MODE: "demo",
+      HOMERELAY_DEMO_MODE: "false",
+      QDRANT_API_KEY: "synthetic-qdrant-key",
+      QDRANT_URL: CONFIG.url,
+    },
+    {
+      HOMERELAY_DATA_MODE: "supabase",
+      HOMERELAY_DEMO_MODE: "false",
+      QDRANT_URL: CONFIG.url,
+    },
+  ])("skips without constructing a client for %o", async (environment) => {
+    const Client = vi.fn();
+    const logger = safeLogger();
+
+    await expect(
+      verifier.runQdrantVerifier({ Client, environment, logger }),
+    ).resolves.toBe(0);
+
+    expect(Client).not.toHaveBeenCalled();
+    expect(logger.log).toHaveBeenCalledWith(
+      expect.stringContaining("SKIP / 未接続"),
+    );
+    expect(logger.error).not.toHaveBeenCalled();
+  });
 });

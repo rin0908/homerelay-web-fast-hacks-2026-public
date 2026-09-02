@@ -26,6 +26,11 @@ type RelayHomeFeedProps = {
   mode: RelayMode;
 };
 
+type OptimisticAction = {
+  applyLocal: (current: HandoffEntry[]) => HandoffEntry[];
+  id: number;
+};
+
 const EMPTY_FIXTURE_ENTRIES: HandoffEntry[] = [];
 
 function mergeFixtures(entries: HandoffEntry[], fixtures: HandoffEntry[]) {
@@ -47,8 +52,10 @@ export function RelayHomeFeed({
   const entriesRef = useRef(entries);
   const requestGeneration = useRef(0);
   const pendingActionsRef = useRef(0);
-  const pendingEpochRef = useRef(0);
   const batchBaseEntriesRef = useRef<HandoffEntry[] | null>(null);
+  const optimisticActionsRef = useRef<OptimisticAction[]>([]);
+  const nextOptimisticActionIdRef = useRef(0);
+  const actionFailureRef = useRef(false);
   const relay = useMemo<HandoffRelay | null>(() => {
     if (mode === "demo") return createDemoRelay(context);
     const client = createClient();
@@ -135,41 +142,62 @@ export function RelayHomeFeed({
 
     if (pendingActionsRef.current === 0) {
       batchBaseEntriesRef.current = previous;
+      optimisticActionsRef.current = [];
+      actionFailureRef.current = false;
+      setErrorMessage(null);
     }
-    const epoch = pendingEpochRef.current;
+    const actionId = nextOptimisticActionIdRef.current;
+    nextOptimisticActionIdRef.current += 1;
+    optimisticActionsRef.current.push({ applyLocal, id: actionId });
     pendingActionsRef.current += 1;
     setPendingActions(pendingActionsRef.current);
     entriesRef.current = optimistic;
     setEntries(optimistic);
     setStatus(optimistic.length > 0 ? "ready" : "empty");
-    setErrorMessage(null);
 
-    void action().then(
-      () => {
-        if (epoch !== pendingEpochRef.current) return;
-        pendingActionsRef.current = Math.max(0, pendingActionsRef.current - 1);
-        setPendingActions(pendingActionsRef.current);
-        if (pendingActionsRef.current === 0) {
-          batchBaseEntriesRef.current = null;
-          void refreshFromSource();
-        }
-      },
-      () => {
-        if (epoch !== pendingEpochRef.current) return;
-        pendingEpochRef.current += 1;
-        pendingActionsRef.current = 0;
-        setPendingActions(0);
-        const fallback = batchBaseEntriesRef.current;
-        batchBaseEntriesRef.current = null;
-        if (fallback) {
-          entriesRef.current = fallback;
-          setEntries(fallback);
-          setStatus(fallback.length > 0 ? "ready" : "empty");
+    const settle = (succeeded: boolean) => {
+      if (!optimisticActionsRef.current.some(({ id }) => id === actionId)) {
+        return;
+      }
+
+      if (!succeeded) {
+        actionFailureRef.current = true;
+        optimisticActionsRef.current = optimisticActionsRef.current.filter(
+          ({ id }) => id !== actionId,
+        );
+        const base = batchBaseEntriesRef.current;
+        if (base) {
+          const reconciled = optimisticActionsRef.current.reduce(
+            (current, optimisticAction) =>
+              optimisticAction.applyLocal(current),
+            base,
+          );
+          entriesRef.current = reconciled;
+          setEntries(reconciled);
+          setStatus(reconciled.length > 0 ? "ready" : "empty");
         }
         setErrorMessage("更新できませんでした。最新の状態を読み直しています。");
-        void refreshFromSource({ preserveError: true });
-      },
-    );
+      }
+
+      pendingActionsRef.current = Math.max(0, pendingActionsRef.current - 1);
+      setPendingActions(pendingActionsRef.current);
+      if (pendingActionsRef.current === 0) {
+        const preserveError = actionFailureRef.current;
+        batchBaseEntriesRef.current = null;
+        optimisticActionsRef.current = [];
+        actionFailureRef.current = false;
+        void refreshFromSource({ preserveError });
+      }
+    };
+
+    try {
+      void action().then(
+        () => settle(true),
+        () => settle(false),
+      );
+    } catch {
+      settle(false);
+    }
   }
 
   function acknowledge(entryId: string, action: EntryStatus) {

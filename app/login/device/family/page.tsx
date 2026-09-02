@@ -1,14 +1,8 @@
-import { notFound } from "next/navigation";
-
 import { DeviceLoginClient } from "@/app/login/device/DeviceLoginClient";
+import { assertDeviceLoginAvailable } from "@/lib/device-login-gate";
 
 export default function FamilyDeviceLoginPage() {
-  if (
-    process.env.NODE_ENV === "production" &&
-    process.env.VERCEL_ENV !== "preview"
-  ) {
-    notFound();
-  }
+  assertDeviceLoginAvailable();
 
   return (
     <DeviceLoginClient

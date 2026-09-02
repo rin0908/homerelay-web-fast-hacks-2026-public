@@ -49,6 +49,18 @@ function completedEntry(): HandoffEntry {
   };
 }
 
+function claimedItemEntry(): HandoffEntry {
+  const entry = baseEntry();
+  return {
+    ...entry,
+    neededItems: entry.neededItems.map((item) => ({
+      ...item,
+      claimedBy: DEMO_FAMILY_CONTEXT.member,
+      status: "purchase_intent",
+    })),
+  };
+}
+
 function deferred() {
   let resolve!: () => void;
   let reject!: (error: Error) => void;
@@ -156,6 +168,87 @@ describe("RelayHomeFeed optimistic actions", () => {
       ),
     );
     expect(await screen.findByText(/更新できませんでした/)).toBeVisible();
+  });
+
+  it("waits for later queued actions before the authoritative failure resync", async () => {
+    const initial = baseEntry();
+    const claimEntry = deferred();
+    const claimItem = deferred();
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValue([claimedItemEntry()]);
+    const relay = {
+      acknowledge: vi.fn(),
+      claimEntry: vi.fn(() => claimEntry.promise),
+      claimItem: vi.fn(() => claimItem.promise),
+      completeEntry: vi.fn(),
+      completeItem: vi.fn(),
+      list,
+      mode: "supabase",
+      publish: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+    } satisfies HandoffRelay;
+    mocks.createSupabaseRelay.mockReturnValue(relay);
+    const user = userEvent.setup();
+
+    render(<RelayHomeFeed context={DEMO_FAMILY_CONTEXT} mode="supabase" />);
+    await screen.findByText(initial.conditionSummary);
+    await user.click(screen.getByRole("button", { name: "私がやります" }));
+    await user.click(screen.getByRole("button", { name: "買います" }));
+
+    await act(async () => claimEntry.reject(new Error("synthetic failure")));
+
+    expect(list).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "私がやります" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "買いました" })).toBeEnabled();
+
+    await act(async () => claimItem.resolve());
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/更新できませんでした/)).toBeVisible();
+  });
+
+  it("keeps a successful prefix when a later action and the resync fail", async () => {
+    const initial = baseEntry();
+    const claimEntry = deferred();
+    const claimItem = deferred();
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([initial])
+      .mockRejectedValueOnce(new Error("synthetic refresh failure"));
+    const relay = {
+      acknowledge: vi.fn(),
+      claimEntry: vi.fn(() => claimEntry.promise),
+      claimItem: vi.fn(() => claimItem.promise),
+      completeEntry: vi.fn(),
+      completeItem: vi.fn(),
+      list,
+      mode: "supabase",
+      publish: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+    } satisfies HandoffRelay;
+    mocks.createSupabaseRelay.mockReturnValue(relay);
+    const user = userEvent.setup();
+
+    render(<RelayHomeFeed context={DEMO_FAMILY_CONTEXT} mode="supabase" />);
+    await screen.findByText(initial.conditionSummary);
+    await user.click(screen.getByRole("button", { name: "私がやります" }));
+    await user.click(screen.getByRole("button", { name: "買います" }));
+
+    await act(async () => claimEntry.resolve());
+    await act(async () => claimItem.reject(new Error("synthetic failure")));
+
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "私がやります" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "買います" })).toBeEnabled();
+    expect(await screen.findByText(/保存結果を読み直せませんでした/)).toBeVisible();
   });
 
   it("shows only the empty-state capture link when no handoff exists", async () => {

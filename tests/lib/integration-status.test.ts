@@ -126,7 +126,7 @@ describe("getIntegrationStatus", () => {
   });
 
   it("lets the emergency flag force demo even when credentials exist", () => {
-    process.env.HOMERELAY_DEMO_MODE = "true";
+    process.env.HOMERELAY_DEMO_MODE = " TRUE ";
     process.env.HOMERELAY_DATA_MODE = "supabase";
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "synthetic-publishable";
@@ -154,7 +154,7 @@ describe("getIntegrationStatus", () => {
       openai: { active: false, configured: true },
     });
 
-    process.env.HOMERELAY_DEMO_MODE = "false";
+    process.env.HOMERELAY_DEMO_MODE = " FALSE ";
     expect(getIntegrationStatus()).toMatchObject({
       dataMode: "misconfigured",
       openai: { active: false, configured: true },
@@ -168,7 +168,7 @@ describe("getIntegrationStatus", () => {
       openai: { active: true, configured: true },
     });
 
-    process.env.HOMERELAY_E2E_ISOLATE_VENDORS = "true";
+    process.env.HOMERELAY_E2E_ISOLATE_VENDORS = " TRUE ";
     expect(getIntegrationStatus()).toMatchObject({
       dataMode: "supabase",
       openai: { active: false, configured: true },

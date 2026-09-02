@@ -125,6 +125,7 @@ describe("POST /api/actions", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.createClient).not.toHaveBeenCalled();
+    expect(mocks.getCurrentSession).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -152,6 +153,7 @@ describe("POST /api/actions", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.createClient).not.toHaveBeenCalled();
+    expect(mocks.getCurrentSession).not.toHaveBeenCalled();
   });
 
   it("accepts valid JSON exactly at the actual-byte boundary", async () => {
@@ -310,8 +312,40 @@ describe("POST /api/actions", () => {
     );
 
     expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      completedCount: 1,
+      error: "操作を完了できませんでした",
+    });
     expect(rpc).toHaveBeenCalledTimes(2);
     expect(rpc).not.toHaveBeenCalledWith("complete_entry", expect.anything());
+  });
+
+  it("projects successful purchase actions before returning a partial failure", async () => {
+    const { rpc, supabase } = createSupabaseMock({ status: "purchase_intent" });
+    rpc
+      .mockResolvedValueOnce({ data: true, error: null })
+      .mockResolvedValueOnce({ data: null, error: { code: "P0001" } });
+    mocks.createClient.mockResolvedValue(supabase);
+
+    const response = await POST(
+      new Request("http://localhost/api/actions", {
+        body: JSON.stringify({
+          actions: [
+            { action: "claim_needed_item", targetId: ITEM_ID },
+            { action: "complete_needed_item", targetId: ITEM_ID },
+          ],
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ completedCount: 1 });
+    expect(mocks.schedulePurchaseActionGraphSync).toHaveBeenCalledOnce();
+    expect(mocks.schedulePurchaseActionGraphSync).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "purchase_intent", itemId: ITEM_ID }),
+    );
   });
 
   it.each([

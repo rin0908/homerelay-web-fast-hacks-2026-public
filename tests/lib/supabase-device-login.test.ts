@@ -66,6 +66,9 @@ function client({
     getClaims,
     getSession,
     maybeSingle,
+    setSessionActive: (active: boolean) => {
+      sessionActive = active;
+    },
     sessionIsActive: () => sessionActive,
     signOut,
     verifyOtp,
@@ -213,5 +216,75 @@ describe("one-time device login", () => {
       consumeDeviceMagicLink(runtime.client, hash(), "family"),
     ).resolves.toBe("membership");
     expect(runtime.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+
+  it.each(["verification", "claims", "membership"] as const)(
+    "returns the safe unavailable outcome when %s does not respond",
+    async (stage) => {
+      vi.useFakeTimers();
+
+      try {
+        const runtime = client();
+        const pending = new Promise<never>(() => undefined);
+        if (stage === "verification") {
+          runtime.verifyOtp.mockReturnValue(pending);
+        } else if (stage === "claims") {
+          runtime.getClaims.mockReturnValue(pending);
+        } else {
+          runtime.maybeSingle.mockReturnValue(pending);
+        }
+
+        const outcome = consumeDeviceMagicLink(
+          runtime.client,
+          hash(),
+          "helper",
+        );
+        await vi.advanceTimersByTimeAsync(15_000);
+
+        await expect(outcome).resolves.toBe("unavailable");
+        expect(runtime.signOut).toHaveBeenCalledWith({ scope: "local" });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("removes a session created by a late verification success", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const runtime = client();
+      let resolveVerification!: (value: { error: null }) => void;
+      const lateVerification = new Promise<{ error: null }>((resolve) => {
+        resolveVerification = resolve;
+      });
+      runtime.verifyOtp.mockImplementation(() =>
+        lateVerification.then((result) => {
+          runtime.setSessionActive(true);
+          return result;
+        }),
+      );
+
+      const outcome = consumeDeviceMagicLink(
+        runtime.client,
+        hash(),
+        "helper",
+      );
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      await expect(outcome).resolves.toBe("unavailable");
+      expect(runtime.sessionIsActive()).toBe(false);
+      expect(runtime.signOut).toHaveBeenCalledOnce();
+
+      resolveVerification({ error: null });
+      await lateVerification;
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(runtime.signOut).toHaveBeenCalledTimes(2);
+      expect(runtime.sessionIsActive()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -47,6 +47,25 @@ function fail(code: string): never {
   throw new Error(`Hosted E2E refused: ${code}`);
 }
 
+class TransientVendorReadbackError extends Error {}
+
+function transientVendorReadback(code: string): never {
+  throw new TransientVendorReadbackError(
+    `Hosted E2E transient read-back failure: ${code}`,
+  );
+}
+
+function isTransientVendorStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function settledValue<T>(result: PromiseSettledResult<T>): T {
+  if (result.status === "rejected") {
+    return fail("vendor_readback_internal_state_invalid");
+  }
+  return result.value;
+}
+
 function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) fail(`${name}_required`);
@@ -414,8 +433,9 @@ async function qdrantFixturePointCount(
   configuration: HostedConfiguration,
   householdId: string,
 ): Promise<number> {
+  let response: Response;
   try {
-    const response = await fetch(
+    response = await fetch(
       `${configuration.qdrantOrigin}/collections/${encodeURIComponent(QDRANT_COLLECTION)}/points/scroll`,
       {
         body: JSON.stringify({
@@ -436,21 +456,27 @@ async function qdrantFixturePointCount(
         signal: AbortSignal.timeout(15_000),
       },
     );
-    if (!response.ok) return fail("qdrant_readback_failed");
-    const value: unknown = await response.json();
-    if (!value || typeof value !== "object" || !("result" in value)) {
-      return fail("qdrant_readback_invalid");
-    }
-    const result = (value as { result: unknown }).result;
-    if (!result || typeof result !== "object" || !("points" in result)) {
-      return fail("qdrant_readback_invalid");
-    }
-    const points = (result as { points: unknown }).points;
-    if (!Array.isArray(points)) return fail("qdrant_readback_invalid");
-    return points.length;
   } catch {
+    return transientVendorReadback("qdrant_transport_failed");
+  }
+
+  if (!response.ok) {
+    if (isTransientVendorStatus(response.status)) {
+      return transientVendorReadback("qdrant_temporarily_unavailable");
+    }
     return fail("qdrant_readback_failed");
   }
+  const value: unknown = await response.json().catch(() => null);
+  if (!value || typeof value !== "object" || !("result" in value)) {
+    return fail("qdrant_readback_invalid");
+  }
+  const result = (value as { result: unknown }).result;
+  if (!result || typeof result !== "object" || !("points" in result)) {
+    return fail("qdrant_readback_invalid");
+  }
+  const points = (result as { points: unknown }).points;
+  if (!Array.isArray(points)) return fail("qdrant_readback_invalid");
+  return points.length;
 }
 
 async function neo4jFixtureCounts(
@@ -462,8 +488,9 @@ async function neo4jFixtureCounts(
     `${configuration.neo4jUsername}:${configuration.neo4jPassword}`,
     "utf8",
   ).toString("base64");
+  let response: Response;
   try {
-    const response = await fetch(configuration.neo4jEndpoint, {
+    response = await fetch(configuration.neo4jEndpoint, {
       body: JSON.stringify({ parameters: { householdId }, statement }),
       headers: {
         Accept: "application/json",
@@ -474,29 +501,35 @@ async function neo4jFixtureCounts(
       redirect: "error",
       signal: AbortSignal.timeout(15_000),
     });
-    if (!response.ok) return fail("neo4j_readback_failed");
-    const value: unknown = await response.json();
-    if (!value || typeof value !== "object" || !("data" in value)) {
-      return fail("neo4j_readback_invalid");
-    }
-    const data = (value as { data: unknown }).data;
-    if (!data || typeof data !== "object" || !("values" in data)) {
-      return fail("neo4j_readback_invalid");
-    }
-    const values = (data as { values: unknown }).values;
-    if (
-      !Array.isArray(values) ||
-      values.length !== 1 ||
-      !Array.isArray(values[0]) ||
-      values[0].length !== 2 ||
-      !values[0].every((item) => typeof item === "number" && Number.isFinite(item))
-    ) {
-      return fail("neo4j_readback_invalid");
-    }
-    return { nodes: values[0][0], relationships: values[0][1] };
   } catch {
+    return transientVendorReadback("neo4j_transport_failed");
+  }
+
+  if (!response.ok) {
+    if (isTransientVendorStatus(response.status)) {
+      return transientVendorReadback("neo4j_temporarily_unavailable");
+    }
     return fail("neo4j_readback_failed");
   }
+  const value: unknown = await response.json().catch(() => null);
+  if (!value || typeof value !== "object" || !("data" in value)) {
+    return fail("neo4j_readback_invalid");
+  }
+  const data = (value as { data: unknown }).data;
+  if (!data || typeof data !== "object" || !("values" in data)) {
+    return fail("neo4j_readback_invalid");
+  }
+  const values = (data as { values: unknown }).values;
+  if (
+    !Array.isArray(values) ||
+    values.length !== 1 ||
+    !Array.isArray(values[0]) ||
+    values[0].length !== 2 ||
+    !values[0].every((item) => typeof item === "number" && Number.isFinite(item))
+  ) {
+    return fail("neo4j_readback_invalid");
+  }
+  return { nodes: values[0][0], relationships: values[0][1] };
 }
 
 async function waitForVendorReadback(
@@ -508,13 +541,31 @@ async function waitForVendorReadback(
   const deadline = Date.now() + 30_000;
 
   while (Date.now() < deadline) {
-    const [qdrantPrimary, qdrantForeign, neo4jPrimary, neo4jForeign] =
-      await Promise.all([
-        qdrantFixturePointCount(configuration, primaryHouseholdId),
-        qdrantFixturePointCount(configuration, foreignHouseholdId),
-        neo4jFixtureCounts(configuration, primaryHouseholdId),
-        neo4jFixtureCounts(configuration, foreignHouseholdId),
-      ]);
+    const results = await Promise.allSettled([
+      qdrantFixturePointCount(configuration, primaryHouseholdId),
+      qdrantFixturePointCount(configuration, foreignHouseholdId),
+      neo4jFixtureCounts(configuration, primaryHouseholdId),
+      neo4jFixtureCounts(configuration, foreignHouseholdId),
+    ] as const);
+
+    let retryTransientFailure = false;
+    for (const result of results) {
+      if (result.status === "fulfilled") continue;
+      if (result.reason instanceof TransientVendorReadbackError) {
+        retryTransientFailure = true;
+        continue;
+      }
+      throw result.reason;
+    }
+    if (retryTransientFailure) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      continue;
+    }
+
+    const qdrantPrimary = settledValue(results[0]);
+    const qdrantForeign = settledValue(results[1]);
+    const neo4jPrimary = settledValue(results[2]);
+    const neo4jForeign = settledValue(results[3]);
     if (
       qdrantPrimary >= 2 &&
       qdrantForeign === 0 &&

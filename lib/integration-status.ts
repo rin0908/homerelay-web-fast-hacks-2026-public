@@ -31,10 +31,13 @@ function hasEveryEnvironmentVariable(names: string[]): boolean {
 }
 
 export function getIntegrationStatus(): IntegrationStatus {
-  const forcedDemo = process.env.HOMERELAY_DEMO_MODE === "true";
-  const explicitLiveApp = process.env.HOMERELAY_DEMO_MODE === "false";
-  const isolateVendors =
-    process.env.HOMERELAY_E2E_ISOLATE_VENDORS === "true";
+  const demoMode = process.env.HOMERELAY_DEMO_MODE?.trim().toLowerCase();
+  const vendorIsolation = process.env.HOMERELAY_E2E_ISOLATE_VENDORS
+    ?.trim()
+    .toLowerCase();
+  const forcedDemo = demoMode === "true";
+  const explicitLiveApp = demoMode === "false";
+  const isolateVendors = vendorIsolation === "true";
   const requestedDataMode =
     !forcedDemo &&
     (explicitLiveApp || process.env.HOMERELAY_DATA_MODE === "supabase")
