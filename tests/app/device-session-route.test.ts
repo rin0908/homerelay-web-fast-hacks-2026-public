@@ -131,6 +131,37 @@ describe("device session guard route", () => {
     expect(guard.state).toBe("active");
   });
 
+  it.each(["error result", "thrown error"])(
+    "fails closed when getClaims returns an %s during completion",
+    async (failureMode) => {
+      if (failureMode === "error result") {
+        mocks.getClaims.mockResolvedValue({
+          data: { claims: { session_id: SESSION_ID, sub: AUTH_USER_ID } },
+          error: new Error("synthetic claims error"),
+        });
+      } else {
+        mocks.getClaims.mockRejectedValue(new Error("synthetic claims failure"));
+      }
+
+      const response = await POST(
+        request("complete", {
+          body: { authUserId: AUTH_USER_ID, expectedRole: "helper" },
+          cookie: [
+            `${SESSION_GUARD_COOKIE_NAME}=${signedOutSessionGuardValue()}`,
+            "sb-synthetic-auth-token=stale",
+          ].join("; "),
+        }),
+      );
+
+      expect(response.status).toBe(401);
+      expect(
+        readSessionGuard(response.cookies.get(SESSION_GUARD_COOKIE_NAME)?.value)
+          .state,
+      ).toBe("signed-out");
+      expect(response.cookies.get("sb-synthetic-auth-token")?.maxAge).toBe(0);
+    },
+  );
+
   it.each([
     {
       body: { authUserId: "synthetic-other-user", expectedRole: "helper" },

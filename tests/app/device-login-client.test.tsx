@@ -1,11 +1,13 @@
 import { StrictMode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
+  cleanup();
   vi.clearAllMocks();
   vi.resetModules();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("DeviceLoginClient", () => {
@@ -62,7 +64,11 @@ describe("DeviceLoginClient", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "/login/device/session?phase=begin",
-      { credentials: "same-origin", method: "POST" },
+      {
+        credentials: "same-origin",
+        method: "POST",
+        signal: expect.any(AbortSignal),
+      },
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
@@ -75,9 +81,98 @@ describe("DeviceLoginClient", () => {
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         method: "POST",
+        signal: expect.any(AbortSignal),
       },
     );
   });
+
+  it.each(["begin", "complete"] as const)(
+    "aborts a stalled %s request and releases the checking UI",
+    async (stalledPhase) => {
+      vi.useFakeTimers();
+      window.history.replaceState(
+        null,
+        "",
+        "/login/device/helper/#token_hash=synthetic&type=magiclink",
+      );
+
+      let stalledSignal: AbortSignal | undefined;
+      const fetchMock = vi.fn(
+        (input: string | URL | Request, init?: RequestInit) => {
+          const phase = String(input).includes("phase=begin")
+            ? "begin"
+            : "complete";
+          if (phase !== stalledPhase) {
+            return Promise.resolve(new Response(null, { status: 204 }));
+          }
+
+          stalledSignal = init?.signal as AbortSignal | undefined;
+          return new Promise<Response>((_resolve, reject) => {
+            stalledSignal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        },
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const consumeDeviceMagicLink = vi.fn(
+        async (factories: {
+          completePersistentSession: (value: {
+            authUserId: string;
+            expectedRole: "helper";
+          }) => Promise<boolean>;
+          preparePersistentSession: () => Promise<boolean>;
+        }) => {
+          await factories.preparePersistentSession();
+          await factories.completePersistentSession({
+            authUserId: "synthetic-helper-user",
+            expectedRole: "helper",
+          });
+          return "invalid" as const;
+        },
+      );
+      vi.doMock("@/lib/supabase/client", () => ({
+        createEphemeralClient: vi.fn(),
+        createTransferClient: vi.fn(),
+      }));
+      vi.doMock("@/lib/supabase/device-login", () => ({
+        consumeDeviceMagicLink,
+      }));
+
+      const { DeviceLoginClient } = await import(
+        "@/app/login/device/DeviceLoginClient"
+      );
+      render(
+        <DeviceLoginClient
+          expectedRole="helper"
+          heading="iPhoneの合成テストログイン"
+        />,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(stalledSignal).toBeDefined();
+      expect(stalledSignal?.aborted).toBe(false);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      expect(stalledSignal?.aborted).toBe(true);
+      expect(
+        screen.getByText(
+          "現在ログインを確認できません。再発行してからお試しください。",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("一度限りの認証を確認しています…"),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it("preserves the current path, strips query credentials, and consumes the fragment once in Strict Mode", async () => {
     window.history.replaceState(

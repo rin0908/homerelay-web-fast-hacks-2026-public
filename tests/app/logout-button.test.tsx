@@ -96,7 +96,48 @@ describe("LogoutButton", () => {
       credentials: "same-origin",
       headers: { "X-HomeRelay-Logout": "fetch" },
       method: "POST",
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it("aborts a stalled server logout and releases both the lock and UI", async () => {
+    vi.useFakeTimers();
+    const lock = installImmediateLock();
+    let stalledSignal: AbortSignal | undefined;
+    vi.mocked(fetch).mockImplementation(
+      (_input: string | URL | Request, init?: RequestInit) => {
+        stalledSignal = init?.signal as AbortSignal | undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          stalledSignal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    );
+    render(<LogoutButton />);
+
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    const button = screen.getByRole("button", { name: "ログアウト" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(lock.isHeld()).toBe(true);
+    expect(button).toBeDisabled();
+    expect(stalledSignal?.aborted).toBe(false);
+
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+
+    expect(stalledSignal?.aborted).toBe(true);
+    expect(lock.isHeld()).toBe(false);
+    expect(button).toBeEnabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "ログアウトを完了できませんでした。もう一度お試しください。",
+    );
+    expect(mocks.signOut).not.toHaveBeenCalled();
   });
 
   it("does not depend on browser signOut after the server committed logout", async () => {

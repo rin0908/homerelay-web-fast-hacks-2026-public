@@ -166,6 +166,45 @@ describe("Supabase session Proxy", () => {
     expect(response.cookies.get(SESSION_GUARD_COOKIE_NAME)).toBeUndefined();
   });
 
+  it.each(["error result", "thrown error"])(
+    "rejects an active guard and clears HomeRelay auth when getClaims has an %s",
+    async (failureMode) => {
+      const guard = await activeSessionGuardValue(
+        "11111111-1111-4111-8111-111111111111",
+      );
+      const request = new NextRequest("https://homerelay.test/record", {
+        headers: {
+          cookie: [
+            `${SESSION_GUARD_COOKIE_NAME}=${guard}`,
+            "sb-synthetic-auth-token=stale",
+            "sb-other-auth-token=keep-me",
+            "unrelated=keep-me-too",
+          ].join("; "),
+        },
+      });
+
+      if (failureMode === "error result") {
+        mocks.getClaims.mockResolvedValue({
+          data: null,
+          error: new Error("synthetic claims error"),
+        });
+      } else {
+        mocks.getClaims.mockRejectedValue(new Error("synthetic claims failure"));
+      }
+
+      const response = await updateSession(request);
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(
+        "https://homerelay.test/login",
+      );
+      expect(response.cookies.get("sb-synthetic-auth-token")?.value).toBe("");
+      expect(response.cookies.get("sb-synthetic-auth-token")?.maxAge).toBe(0);
+      expect(response.cookies.get("sb-other-auth-token")).toBeUndefined();
+      expect(response.cookies.get("unrelated")).toBeUndefined();
+    },
+  );
+
   it("makes signed-out authoritative without contacting Supabase", async () => {
     const request = new NextRequest("https://homerelay.test/", {
       headers: {

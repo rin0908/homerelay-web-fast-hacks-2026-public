@@ -577,6 +577,115 @@ describe("SupabaseRelay", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("settles every unsent pending action when an in-flight outcome becomes uncertain", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let rejectRequest!: (error: unknown) => void;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((_resolve, reject) => {
+          rejectRequest = reject;
+        }),
+    );
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 60_000, fetch: fetchMock },
+    );
+
+    // Ten actions trigger an immediate maximum-size flush. Actions accepted
+    // while that request is in flight remain in #pendingActions with a long
+    // timer and must not wait for that timer after the outcome is uncertain.
+    const inFlight = Array.from({ length: 10 }, () =>
+      relay.acknowledge(entryId),
+    );
+    const inFlightSettlement = Promise.allSettled(inFlight);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const unsentSettlement = Promise.allSettled([
+      relay.claimEntry(entryId),
+      relay.completeEntry(entryId),
+    ]);
+    rejectRequest(new TypeError("synthetic outcome unknown"));
+
+    const results = [
+      ...(await inFlightSettlement),
+      ...(await unsentSettlement),
+    ];
+    expect(results).toHaveLength(12);
+    for (const result of results) {
+      expect(result).toMatchObject({
+        reason: { code: "ACTION_FAILED" },
+        status: "rejected",
+      });
+    }
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("never revives a pre-failure serialized batch after list recovery", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let rejectFirst!: (error: unknown) => void;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((_resolve, reject) => {
+            rejectFirst = reject;
+          }),
+      )
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, fetch: fetchMock },
+    );
+
+    const first = relay.acknowledge(entryId);
+    const firstSettlement = Promise.allSettled([first]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    // Each batch is removed from #pendingActions and captured separately by
+    // the flush chain while the first request is still in flight. Several
+    // batches leave enough serialized turns for list() to recover the boolean
+    // flag before the last old batch reaches send(). The generation must still
+    // reject every one of them.
+    const stale: Promise<void>[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      stale.push(relay.claimEntry(entryId));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    const staleSettlement = Promise.allSettled(stale);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const recovery = first.catch(() => relay.list());
+
+    rejectFirst(new TypeError("synthetic outcome unknown"));
+    await recovery;
+    await expect(firstSettlement).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+
+    const staleResults = await staleSettlement;
+    expect(staleResults).toHaveLength(6);
+    for (const result of staleResults) {
+      expect(result).toMatchObject({
+        reason: { code: "ACTION_FAILED" },
+        status: "rejected",
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const retry = relay.claimEntry(entryId);
+    await vi.advanceTimersByTimeAsync(0);
+    await retry;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("recovers guarded actions only after an authoritative list succeeds", async () => {
     vi.useFakeTimers();
     const harness = createHarness();

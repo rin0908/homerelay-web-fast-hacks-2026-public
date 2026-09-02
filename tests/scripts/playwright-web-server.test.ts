@@ -10,15 +10,33 @@ type ServerEnvironmentModule = Readonly<{
   ) => void;
 }>;
 
+type LiveE2eModule = Readonly<{
+  PLAYWRIGHT_LIVE_E2E_PROJECT: "desktop-1280";
+  isPlaywrightLiveE2EEnabled: (
+    environment: Record<string, string | undefined>,
+  ) => boolean;
+  shouldRunPlaywrightLiveE2EProject: (
+    liveEnabled: boolean,
+    projectName: string,
+  ) => boolean;
+}>;
+
 let serverEnvironment: ServerEnvironmentModule;
+let liveE2e: LiveE2eModule;
 
 beforeAll(async () => {
-  const moduleUrl = pathToFileURL(
-    resolve(process.cwd(), "scripts", "playwright-web-server-env.mjs"),
-  ).href;
-  serverEnvironment = (await import(
-    /* @vite-ignore */ moduleUrl
-  )) as ServerEnvironmentModule;
+  const [serverEnvironmentModule, liveE2eModule] = await Promise.all(
+    ["playwright-web-server-env.mjs", "playwright-live-e2e.mjs"].map(
+      async (file) =>
+        import(
+          /* @vite-ignore */ pathToFileURL(
+            resolve(process.cwd(), "scripts", file),
+          ).href
+        ),
+    ),
+  );
+  serverEnvironment = serverEnvironmentModule as ServerEnvironmentModule;
+  liveE2e = liveE2eModule as LiveE2eModule;
 });
 
 describe("synthetic Playwright server isolation", () => {
@@ -60,20 +78,35 @@ describe("synthetic Playwright server isolation", () => {
     });
   });
 
-  it("normalizes the live opt-in at every Playwright entry point", async () => {
-    const sources = await Promise.all(
-      [
-        "playwright.config.ts",
-        "scripts/playwright-global-teardown.mjs",
-        "tests/e2e/live-flow.spec.ts",
-      ].map((file) => readFile(resolve(process.cwd(), file), "utf8")),
-    );
+  it.each([
+    [undefined, false],
+    ["", false],
+    ["false", false],
+    [" TRUE ", true],
+    ["TrUe", true],
+    ["1", false],
+  ])("parses the live opt-in %j as %s", (value, expected) => {
+    expect(
+      liveE2e.isPlaywrightLiveE2EEnabled({ HOMERELAY_E2E_LIVE: value }),
+    ).toBe(expected);
+  });
 
-    for (const source of sources) {
-      expect(source).toContain(
-        'HOMERELAY_E2E_LIVE?.trim().toLowerCase() === "true"',
-      );
-    }
+  it.each([
+    [true, "desktop-1280", true],
+    [true, "phone-390", false],
+    [false, "desktop-1280", false],
+    [true, "desktop-1280 ", false],
+  ])(
+    "runs live fixture setup only when enabled for project %j",
+    (enabled, projectName, expected) => {
+      expect(
+        liveE2e.shouldRunPlaywrightLiveE2EProject(enabled, projectName),
+      ).toBe(expected);
+    },
+  );
+
+  it("pins live fixture setup to the one desktop project", () => {
+    expect(liveE2e.PLAYWRIGHT_LIVE_E2E_PROJECT).toBe("desktop-1280");
   });
 
   it("never reuses a server that may have live credentials loaded", async () => {

@@ -96,6 +96,42 @@ describe("createSupabaseAbortingFetch", () => {
     expect(receivedSignal?.aborted).toBe(true);
   });
 
+  it.each(["body", "clone"] as const)(
+    "retains the finite deadline for direct %s stream consumption",
+    async (readMode) => {
+      vi.useFakeTimers();
+      let receivedSignal: AbortSignal | undefined;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+          receivedSignal = init?.signal ?? undefined;
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              receivedSignal?.addEventListener("abort", () => {
+                controller.error(new DOMException("Aborted", "AbortError"));
+              });
+            },
+          });
+          return Promise.resolve(new Response(body, { status: 200 }));
+        }),
+      );
+
+      const response = await createSupabaseAbortingFetch()(
+        "https://synthetic.supabase.co/auth/v1/user",
+      );
+      const streamedResponse = readMode === "clone" ? response.clone() : response;
+      const read = streamedResponse.body?.getReader().read();
+      expect(read).toBeDefined();
+      const rejection = expect(read).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      await rejection;
+      expect(receivedSignal?.aborted).toBe(true);
+    },
+  );
+
   it("clears the deadline after body consumption", async () => {
     vi.useFakeTimers();
     let receivedSignal: AbortSignal | undefined;

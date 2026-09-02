@@ -99,6 +99,7 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("AuthSessionBoundary", () => {
@@ -165,6 +166,46 @@ describe("AuthSessionBoundary", () => {
       redirect: "manual",
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it("fails closed when the authoritative server session request rejects", async () => {
+    mocks.fetch.mockRejectedValue(new Error("synthetic server failure"));
+    render(
+      <AuthSessionBoundary
+        expectedAuthUserId="synthetic-expected-user"
+        mode="supabase"
+      >
+        <p>synthetic private handoff</p>
+      </AuthSessionBoundary>,
+    );
+
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/login"));
+    expect(
+      screen.queryByText("synthetic private handoff"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("ログイン状態が変わりました。ログイン画面へ移動します。"),
+    ).toBeInTheDocument();
+  });
+
+  it("fails closed when the browser claims request rejects", async () => {
+    mocks.getClaims.mockRejectedValue(new Error("synthetic claims failure"));
+    render(
+      <AuthSessionBoundary
+        expectedAuthUserId="synthetic-expected-user"
+        mode="supabase"
+      >
+        <p>synthetic private handoff</p>
+      </AuthSessionBoundary>,
+    );
+
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/login"));
+    expect(
+      screen.queryByText("synthetic private handoff"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("ログイン状態が変わりました。ログイン画面へ移動します。"),
+    ).toBeInTheDocument();
   });
 
   it.each([
@@ -275,6 +316,69 @@ describe("AuthSessionBoundary", () => {
     expect(
       screen.queryByText("synthetic private handoff"),
     ).not.toBeInTheDocument();
+  });
+
+  it("hides private children while a same-user auth change is rechecked", async () => {
+    render(
+      <AuthSessionBoundary
+        expectedAuthUserId="synthetic-expected-user"
+        mode="supabase"
+      >
+        <p>synthetic private handoff</p>
+      </AuthSessionBoundary>,
+    );
+    expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+
+    let releaseClaims!: () => void;
+    const claimsCanResolve = new Promise<void>((resolve) => {
+      releaseClaims = resolve;
+    });
+    mocks.getClaims.mockImplementationOnce(async () => {
+      await claimsCanResolve;
+      return {
+        data: {
+          claims: {
+            session_id: SESSION_ID,
+            sub: "synthetic-expected-user",
+          },
+        },
+        error: null,
+      };
+    });
+
+    act(() =>
+      mocks.callback?.("TOKEN_REFRESHED", {
+        user: { id: "synthetic-expected-user" },
+      }),
+    );
+    expect(
+      screen.queryByText("synthetic private handoff"),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      releaseClaims();
+      await claimsCanResolve;
+    });
+    expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+  });
+
+  it("uses a relaxed 60-second background recheck interval", async () => {
+    const intervalSpy = vi.spyOn(window, "setInterval");
+    try {
+      render(
+        <AuthSessionBoundary
+          expectedAuthUserId="synthetic-expected-user"
+          mode="supabase"
+        >
+          <p>synthetic private handoff</p>
+        </AuthSessionBoundary>,
+      );
+
+      expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+      expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 60_000);
+    } finally {
+      intervalSpy.mockRestore();
+    }
   });
 
   it("never reuses a stale in-flight identity check after a newer focus check", async () => {

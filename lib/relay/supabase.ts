@@ -228,6 +228,7 @@ export class SupabaseRelay implements HandoffRelay {
   readonly #onSubscriptionError?: (error: SupabaseRelayError) => void;
   #actionBatchTimer: ReturnType<typeof setTimeout> | null = null;
   #actionFlushChain: Promise<void> = Promise.resolve();
+  #actionOutcomeGeneration = 0;
   #actionOutcomeUncertain = false;
   #pendingActions: PendingGuardedAction[] = [];
 
@@ -445,16 +446,39 @@ export class SupabaseRelay implements HandoffRelay {
     });
   }
 
+  #markActionOutcomeUncertain(error: SupabaseRelayError): void {
+    if (!this.#actionOutcomeUncertain) {
+      this.#actionOutcomeGeneration += 1;
+    }
+    this.#actionOutcomeUncertain = true;
+    if (this.#actionBatchTimer) clearTimeout(this.#actionBatchTimer);
+    this.#actionBatchTimer = null;
+
+    // These actions have not yet been spliced into a serialized batch. Once a
+    // prior request has an unknown server-side outcome, none may be sent, and
+    // every caller must be settled immediately rather than left pending until
+    // another timer or user interaction happens.
+    const unsent = this.#pendingActions.splice(0);
+    unsent.forEach(({ reject }) => reject(error));
+  }
+
   async #flushGuardedActions(): Promise<void> {
     this.#actionBatchTimer = null;
     const pending = this.#pendingActions.splice(0, MAX_ACTION_BATCH_SIZE);
     if (pending.length === 0) return;
+    const batchGeneration = this.#actionOutcomeGeneration;
 
     const send = async () => {
       // A prior transport timeout has an unknown server-side outcome. Never
       // send a dependent transition from this relay instance after that point;
       // the caller must reload the authoritative Supabase state first.
-      if (this.#actionOutcomeUncertain) {
+      // The generation check also rejects batches already captured by the
+      // serialized flush chain before the failure. A later successful list()
+      // may recover newly requested actions, but it must not revive old work.
+      if (
+        this.#actionOutcomeUncertain ||
+        batchGeneration !== this.#actionOutcomeGeneration
+      ) {
         const relayError = new SupabaseRelayError("ACTION_FAILED");
         pending.forEach(({ reject }) => reject(relayError));
         return;
@@ -495,11 +519,11 @@ export class SupabaseRelay implements HandoffRelay {
         }
         pending.forEach(({ resolve }) => resolve());
       } catch (error) {
-        this.#actionOutcomeUncertain = true;
         const relayError =
           error instanceof SupabaseRelayError
             ? error
             : new SupabaseRelayError("ACTION_FAILED");
+        this.#markActionOutcomeUncertain(relayError);
         pending.forEach(({ reject }) => reject(relayError));
       }
     };

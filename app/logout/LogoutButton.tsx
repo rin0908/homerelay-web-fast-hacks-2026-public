@@ -9,6 +9,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 
 const LOGOUT_LOCK_ACQUIRE_TIMEOUT_MS = 5_000;
+const LOGOUT_REQUEST_TIMEOUT_MS = 10_000;
 const LOCAL_SIGN_OUT_NOTIFICATION_TIMEOUT_MS = 750;
 const LOGOUT_ERROR_MESSAGE =
   "ログアウトを完了できませんでした。もう一度お試しください。";
@@ -38,11 +39,22 @@ async function notifyOtherTabsOfLocalSignOut(): Promise<void> {
 }
 
 async function commitServerLogout(): Promise<void> {
-  const response = await fetch("/logout", {
-    credentials: "same-origin",
-    headers: { "X-HomeRelay-Logout": "fetch" },
-    method: "POST",
-  });
+  const abortController = new AbortController();
+  const timer = window.setTimeout(
+    () => abortController.abort(),
+    LOGOUT_REQUEST_TIMEOUT_MS,
+  );
+  let response: Response;
+  try {
+    response = await fetch("/logout", {
+      credentials: "same-origin",
+      headers: { "X-HomeRelay-Logout": "fetch" },
+      method: "POST",
+      signal: abortController.signal,
+    });
+  } finally {
+    window.clearTimeout(timer);
+  }
   if (!response.ok) throw new Error("logout_not_committed");
 
   // The HttpOnly server guard is already signed-out. This best-effort local

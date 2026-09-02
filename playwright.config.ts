@@ -1,8 +1,8 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { isPlaywrightLiveE2EEnabled } from "./scripts/playwright-live-e2e.mjs";
 
-const liveE2e =
-  process.env.HOMERELAY_E2E_LIVE?.trim().toLowerCase() === "true";
+const liveE2e = isPlaywrightLiveE2EEnabled();
 const e2ePort = liveE2e ? 3101 : 3100;
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 const fakeCameraFile = path.resolve(

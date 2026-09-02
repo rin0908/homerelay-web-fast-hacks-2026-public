@@ -39,4 +39,20 @@ describe("GET /api/session", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("cache-control")).toContain("private");
   });
+
+  it.each(["short", "invalid session id", "x".repeat(257)])(
+    "rejects an invalid verified session id: %s",
+    async (sessionId) => {
+      mocks.getCurrentSession.mockResolvedValue({
+        member: { id: "synthetic-member" },
+        sessionId,
+        userId: "synthetic-user",
+      });
+
+      const response = await GET();
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("cache-control")).toContain("no-store");
+    },
+  );
 });

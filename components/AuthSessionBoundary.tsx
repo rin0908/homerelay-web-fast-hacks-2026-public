@@ -11,6 +11,7 @@ import {
 } from "@/lib/supabase/session-guard";
 
 const SERVER_SESSION_CHECK_TIMEOUT_MS = 10_000;
+const SESSION_RECHECK_INTERVAL_MS = 60_000;
 const SESSION_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/;
 
 type AuthoritativeServerSession = {
@@ -155,10 +156,13 @@ export function AuthSessionBoundary({
     function requestIdentityCheck(hideWhileChecking: boolean) {
       if (!active) return;
       // Periodic checks never supersede in-flight work. This prevents a slow
-      // provider read from being perpetually made stale by the 5-second tick.
+      // provider read from being perpetually made stale by the background tick.
       if (checking && !hideWhileChecking) return;
       const generation = ++latestGeneration;
-      if (hideWhileChecking) setVerifiedUserId(null);
+      if (hideWhileChecking) {
+        setVerifiedUserId(null);
+        setVerifiedSessionFingerprint(null);
+      }
       if (checking) {
         recheckQueued = true;
         return;
@@ -172,8 +176,12 @@ export function AuthSessionBoundary({
           invalidate();
         } else if (session && session.user.id !== expectedAuthUserId) {
           invalidate();
-        } else if (event === "USER_UPDATED") {
-          router.refresh();
+        } else {
+          // Same-user sign-in/token changes still need the exact session
+          // fingerprint check. Hide private children until both the browser
+          // and HttpOnly server guard confirm the RSC-bound session again.
+          requestIdentityCheck(true);
+          if (event === "USER_UPDATED") router.refresh();
         }
       },
     );
@@ -189,7 +197,10 @@ export function AuthSessionBoundary({
     window.addEventListener("focus", checkAfterFocus);
     window.addEventListener("pageshow", checkAfterFocus);
     document.addEventListener("visibilitychange", checkAfterFocus);
-    const interval = window.setInterval(() => checkWhenVisible(false), 5_000);
+    const interval = window.setInterval(
+      () => checkWhenVisible(false),
+      SESSION_RECHECK_INTERVAL_MS,
+    );
 
     return () => {
       active = false;

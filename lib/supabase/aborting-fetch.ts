@@ -10,8 +10,12 @@ function keepDeadlineThroughBody(
   }
 
   // fetch() resolves after headers, before response.json()/text() consumes the
-  // body. Supabase Auth awaits that body, so keep the same AbortSignal alive
-  // through consumption instead of clearing the deadline at headers.
+  // body. The current Supabase JS/Auth SDK consumes these responses via
+  // response.json(), so keep the same AbortSignal alive through that read
+  // instead of clearing the deadline at headers. A future caller that reads
+  // response.body directly, or consumes a response.clone() stream, retains the
+  // same intentional 15-second deadline and may be aborted; this wrapper is
+  // not an unlimited streaming transport.
   return new Proxy(response, {
     get(target, property) {
       if (property === "json") {

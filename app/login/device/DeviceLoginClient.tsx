@@ -32,11 +32,36 @@ const MESSAGE: Record<Exclude<DeviceLoginOutcome, "success">, string> = {
   unavailable: "現在ログインを確認できません。再発行してからお試しください。",
 };
 
+const DEVICE_SESSION_REQUEST_TIMEOUT_MS = 10_000;
+
+async function requestDeviceSession(
+  input: string,
+  init: RequestInit,
+): Promise<Response> {
+  const abortController = new AbortController();
+  const timer = window.setTimeout(
+    () => abortController.abort(),
+    DEVICE_SESSION_REQUEST_TIMEOUT_MS,
+  );
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: abortController.signal,
+    });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 async function prepareDeviceSession(): Promise<boolean> {
-  const response = await fetch("/login/device/session?phase=begin", {
-    credentials: "same-origin",
-    method: "POST",
-  });
+  const response = await requestDeviceSession(
+    "/login/device/session?phase=begin",
+    {
+      credentials: "same-origin",
+      method: "POST",
+    },
+  );
   return response.ok;
 }
 
@@ -47,12 +72,15 @@ async function completeDeviceSession({
   authUserId: string;
   expectedRole: DeviceLoginRole;
 }): Promise<boolean> {
-  const response = await fetch("/login/device/session?phase=complete", {
-    body: JSON.stringify({ authUserId, expectedRole }),
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
+  const response = await requestDeviceSession(
+    "/login/device/session?phase=complete",
+    {
+      body: JSON.stringify({ authUserId, expectedRole }),
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    },
+  );
   return response.ok;
 }
 

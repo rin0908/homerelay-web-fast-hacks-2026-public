@@ -6,7 +6,7 @@
 
 ## すぐ動かす（合成デモ）
 
-Node.js 22以降を用意し、リポジトリ直下で実行します。
+Node.js 22.9.0以降を用意し、リポジトリ直下で実行します。
 
 ```powershell
 npm ci
@@ -196,7 +196,7 @@ Windowsストップウォッチで、iPhoneの固定CTAタップからWindowsの
 
 cleanup直前のserver-side read-backでは、最新entryの3対応と購入完了、Qdrantの最新handoff／必要品1件と別世帯0件、Neo4jの`done`／7 relationshipsと別世帯0件を確認しました。その後、固定台帳の合成fixtureだけを一度cleanupし、直後と2秒後の2回とも、Auth users、5 public tables、Storage objects、Qdrant fixture points、Neo4j fixture nodes／relationshipsがすべて0件でした。ローカルの3つの一時合成パスワードと一度限りログインQRも削除済みです。
 
-この受入後の最終ローカル検証は、lint、typecheck、集中22/22 tests、全unit 56 files / 434 tests、synthetic E2E 16/16（live-only 2件はfixture cleanup後の再生成を避けるため意図的skip）、production build、privacy／reachable-history secret scan、production dependency audit 0件、`git diff --check`がPASSしました。
+この物理受入時点のローカル検証は、lint、typecheck、集中22/22 tests、全unit 56 files / 434 tests、synthetic E2E 16/16（live-only 2件はfixture cleanup後の再生成を避けるため意図的skip）、production build、privacy／reachable-history secret scan、production dependency audit 0件、`git diff --check`がPASSしました。後述するCodeRabbit対応後の最新HEADは別に再検証しており、この受入時のPreviewとは区別します。
 
 締めの言葉: 「HomeRelayは監視ではありません。写真と声だけで、次の人へ温かくバトンを渡すWebアプリです。」
 
@@ -257,13 +257,13 @@ Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY_AUDIO
 
 対応・購入の5操作は、タップ時に短い状態表示とともに即時反映し、認証付きのguarded RPCを順序どおり一括送信します。送信中のRealtime表示は保留してSupabase正本を最後に読み戻し、失敗時は楽観表示を戻して警告します。別batchも直列送信し、画面離脱時はpending actionを`keepalive`でflushします。Neo4j派生graphには`買います`と`買いました`の両イベントを残し、アクセス権限は引き続きSupabaseだけで判定します。
 
-このcheckpointではlint、typecheck、56 files / 434 unit tests、16 synthetic E2E（live-only 2件は意図的skip）、Next.js 16.3.3 production build、privacy audit、production dependency audit、`git diff --check`がPASSしました。privacy auditは190公開候補ファイル、到達可能Git履歴、41 browser配信ファイルを検査し、private media、credential pattern、runtime content log、server-secret markerを検出していません。更新後PRIVATE Previewでもstandalone起動、固定CTA、即時操作、iPhone＋Windowsの中心導線を物理確認し、60秒と56秒の2回連続成功まで完了しました。
+このcheckpointではlint、typecheck、56 files / 434 unit tests、16 synthetic E2E（live-only 2件は意図的skip）、Next.js 16.3.3 production build、privacy audit、production dependency audit、`git diff --check`がPASSしました。privacy auditは190公開候補ファイル、到達可能Git履歴、41 browser配信ファイルを検査し、private media、credential pattern、runtime content log、server-secret markerを検出していません。この時点のPRIVATE Previewでもstandalone起動、固定CTA、即時操作、iPhone＋Windowsの中心導線を物理確認し、60秒と56秒の2回連続成功まで完了しました。
 
 ### CodeRabbit実レビュー（2026-09-02）
 
-新しいPUBLIC repositoryだけにCodeRabbitを接続し、PR #1の`b9e56a5813b0116d08eb88e992fede66c9c2f336`へ手動のfull reviewを実行しました。CodeRabbitはレビュー完了を返し、23件のactionable commentを取得しました。20件はコード／テスト／文書で修正し、1件は既存の`afterEach`で既に保護済み、1件はSupabase専用E2Eからvendor隔離を外して課金・残存データを発生させ得るため却下、1件は単一serverless runtime内のrate limitという既知の防御層として受容しました。
+新しいPUBLIC repositoryだけにCodeRabbitを接続し、PR #1の`b9e56a5813b0116d08eb88e992fede66c9c2f336`へ[手動full review](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1#pullrequestreview-5086311772)を実行しました。CodeRabbitは23件のactionable commentを返し、20件はコード／テスト／文書で修正、1件は既存の`afterEach`で保護済み、1件はSupabase専用E2Eのvendor隔離を弱めるため却下、1件は単一serverless runtime内のrate limitという既知の防御層として受容しました。続く`32db7d9…`への[増分review](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1#pullrequestreview-5088079735)ではactionable 4件とoutside-diff 1件を取得し、Node要件、live flag正規化、vendor read-back分類、遅延Auth test、action timeoutの5件をすべて修正しました。
 
-修正後はlint、typecheck、58 files / 457 unit tests、16/16 synthetic E2E（live-only 2件はfixture cleanup後のため意図的skip）、production build、194公開候補ファイルと41 browser配信ファイルのprivacy／secret監査、production dependency audit、`git diff --check`がPASSしています。実iPhone＋Windowsの60秒／56秒証拠はレビュー前Previewで取得したため、修正後Previewへの再deployは未実施です。PRはOPEN・未mergeで、増分レビュー結果は修正branchのpush後に追記します。
+`f996dc6…`ではさらに、遅延`Set-Cookie`と並行ログイン／ログアウトをHttpOnly session guard、server session fingerprint、共有Web Lockでfail closedにし、曖昧なaction応答後の依存batchを止めてSupabase正本のread-backでのみ解除するよう強化しました。同HEADへの[CodeRabbit最終増分review](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1#pullrequestreview-5090633444)は完了し、actionable 9件を取得しました。現在のreview対応候補では、認証fetchの10秒timeout、非表示中のsession fingerprint破棄、60秒fallback再確認、全pending actionの失敗通知、回復後も古いbatchを復活させない世代管理、live E2E fixtureの単一project化とSupabase正本read-back／対象限定cleanupを追加し、9件をすべて修正しています。`npm run verify:release`はlint、typecheck、68 files / 580 unit tests、16/16 synthetic E2E（live-only 2件はcleanup済み外部fixtureを再作成しないため意図的skip）、Next.js 16.3.3 production build、215公開候補ファイルと43 browser配信ファイルのprivacy／secret監査に合格し、production dependency audit 0件、`git diff --check`もPASSしました。実iPhone＋Windowsの60秒／56秒証拠はそれ以前のPRIVATE Previewで取得したため、このreview対応候補のPreview再deployと物理2端末再試験は未実施です。PRはOPEN・未mergeで、push後のCodeRabbit再reviewが残っています。
 
 ### Qdrant / Neo4j live検証（2026-08-30）
 
@@ -295,7 +295,7 @@ loopback検証に必要な`HOMERELAY_TEST_*`と`HOMERELAY_E2E_*`は、[HomeRelay
 - Qdrant: **Qdrant Cloud Freeへ実接続済み・live検証PASS**。`homerelay-qdrant`のHealthy、bootstrap、Cloud Inferenceの類似申し送り／必要品、別世帯filter、検証point削除後0件を確認しました。
 - Neo4j: **AuraDB Freeへ実接続済み・live検証PASS**。`homerelay-graph`のRunning、5 constraints、Home／foreign graphのparameterized write、関係read-back、Home filterでforeign 0件、両世帯cleanup後node／relationship各0件を確認しました。2026 Auraのusername／database形式にも対応済みです。
 - Datadog: verifierとserver-only numeric metricsは実装済みですが、AP1 Japanの認証コード送信／再送信が2つの異なるメールでDatadog側の「不明なエラー」になりました。API key未作成・未保存、live未実行のため**未接続・未使用**です。同じ登録操作は繰り返さず、他工程後に1回だけ再試行します。
-- CodeRabbit: 新しいPUBLIC HomeRelay repositoryだけに接続し、PR #1で実full reviewを完了したため**使用済み**です。初回23件を取得し、20件を修正、既存保護済み1件・安全設計上却下1件・受容した構成上の制限1件を根拠付きで分類しました。修正branchの増分レビューはpush後に行い、PRはまだmergeしません。
+- CodeRabbit: 新しいPUBLIC HomeRelay repositoryだけに接続し、PR #1で実full reviewと2回の増分reviewを完了したため**使用済み**です。初回23件を分類・対応し、続くactionable 4件＋outside-diff 1件を修正しました。`f996dc6…`への最終増分reviewで得たactionable 9件も現在の候補ですべて修正・ローカル検証済みです。PRはOPEN・未mergeで、修正push後の再reviewが残っています。
 - HackerSquad: builder loginは成功しましたが、対象イベントがArchivedで提出ボタン／project導線がなく、project作成・提出は未実行です。提出済み・使用済みとは扱いません。
 
 詳細な目的、実装ファイル、検証、デモ箇所、必要資格情報は[SPONSOR_TOOL_EVIDENCE.md](SPONSOR_TOOL_EVIDENCE.md)にあります。

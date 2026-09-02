@@ -100,6 +100,21 @@ describe("HomeRelay Supabase session", () => {
   });
 
   it.each([
+    ["missing", { sub: "synthetic-auth-user" }],
+    ["too short", { session_id: "short", sub: "synthetic-auth-user" }],
+    [
+      "invalid characters",
+      { session_id: "invalid session id", sub: "synthetic-auth-user" },
+    ],
+  ])("rejects a %s session_id claim before querying members", async (_name, claims) => {
+    const setup = clientSetup({ claims });
+
+    await expect(getCurrentSession(setup.client)).resolves.toBeNull();
+    expect(setup.from).not.toHaveBeenCalled();
+    expect(setup.getSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
     [{ role: "unknown" }],
     [{ auth_user_id: "another-user" }],
     [null],
