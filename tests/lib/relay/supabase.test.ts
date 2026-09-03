@@ -686,6 +686,62 @@ describe("SupabaseRelay", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not recover actions from a list started before an uncertain outcome", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let resolveStaleList!: (value: {
+      data: SupabaseListEntryRow[];
+      error: null;
+    }) => void;
+    harness.query.limit
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveStaleList = resolve;
+        }),
+      )
+      .mockResolvedValue({ data: [listRow()], error: null });
+
+    let rejectAction!: (error: unknown) => void;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((_resolve, reject) => {
+            rejectAction = reject;
+          }),
+      )
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, fetch: fetchMock },
+    );
+
+    const staleList = relay.list();
+    const uncertain = relay.acknowledge(entryId);
+    const uncertainSettlement = Promise.allSettled([uncertain]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    rejectAction(new TypeError("synthetic outcome unknown"));
+    await expect(uncertainSettlement).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+
+    resolveStaleList({ data: [listRow()], error: null });
+    await staleList;
+    await expect(relay.claimEntry(entryId)).rejects.toMatchObject({
+      code: "ACTION_FAILED",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    await relay.list();
+    const retry = relay.claimEntry(entryId);
+    await vi.advanceTimersByTimeAsync(0);
+    await retry;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("recovers guarded actions only after an authoritative list succeeds", async () => {
     vi.useFakeTimers();
     const harness = createHarness();

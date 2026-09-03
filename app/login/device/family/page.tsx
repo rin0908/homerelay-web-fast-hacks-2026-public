@@ -1,8 +1,12 @@
 import { DeviceLoginClient } from "@/app/login/device/DeviceLoginClient";
-import { assertDeviceLoginAvailable } from "@/lib/device-login-gate";
+import {
+  assertDeviceLoginAvailable,
+  redirectAuthenticatedDeviceLogin,
+} from "@/lib/device-login-gate";
 
-export default function FamilyDeviceLoginPage() {
+export default async function FamilyDeviceLoginPage() {
   assertDeviceLoginAvailable();
+  await redirectAuthenticatedDeviceLogin();
 
   return (
     <DeviceLoginClient

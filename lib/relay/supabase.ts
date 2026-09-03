@@ -253,6 +253,7 @@ export class SupabaseRelay implements HandoffRelay {
   }
 
   async list(): Promise<HandoffEntry[]> {
+    const listGeneration = this.#actionOutcomeGeneration;
     try {
       const { data, error } = await this.#client
         .from("entries")
@@ -278,12 +279,12 @@ export class SupabaseRelay implements HandoffRelay {
           );
         }),
       );
-      // A successful authoritative read is the recovery boundary after an
-      // uncertain action response. Every guarded RPC is an atomic,
-      // state-checked transition (and same-member retries are idempotent), so
-      // a retry after this read can only succeed/no-op or be rejected by the
-      // current Supabase state; it cannot skip a transition.
-      this.#actionOutcomeUncertain = false;
+      // Only a read started after the latest uncertain action response is a
+      // recovery boundary. An older in-flight read may carry a pre-action
+      // snapshot and must not reopen guarded writes when it finishes late.
+      if (listGeneration === this.#actionOutcomeGeneration) {
+        this.#actionOutcomeUncertain = false;
+      }
       return entries;
     } catch (error) {
       if (error instanceof SupabaseRelayError) throw error;
