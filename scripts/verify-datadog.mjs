@@ -40,14 +40,6 @@ function timeoutMs(value) {
 }
 
 export function safeDatadogConfiguration(environment = process.env) {
-  const canonicalApiKey = environment.DD_API_KEY?.trim() ?? "";
-  const legacyApiKey = environment.DATADOG_API_KEY?.trim() ?? "";
-  if (canonicalApiKey && legacyApiKey && canonicalApiKey !== legacyApiKey) {
-    throw new Error("DD_API_KEY_CONFLICT");
-  }
-  const apiKey = canonicalApiKey || legacyApiKey;
-  if (!apiKey) return null;
-
   const forcedDemo =
     environment.HOMERELAY_DEMO_MODE?.trim().toLowerCase() === "true";
   const isolated =
@@ -55,6 +47,14 @@ export function safeDatadogConfiguration(environment = process.env) {
     "true";
   const dataMode = environment.HOMERELAY_DATA_MODE?.trim().toLowerCase();
   if (forcedDemo || isolated || dataMode !== "supabase") return null;
+
+  const canonicalApiKey = environment.DD_API_KEY?.trim() ?? "";
+  const legacyApiKey = environment.DATADOG_API_KEY?.trim() ?? "";
+  if (canonicalApiKey && legacyApiKey && canonicalApiKey !== legacyApiKey) {
+    throw new Error("DD_API_KEY_CONFLICT");
+  }
+  const apiKey = canonicalApiKey || legacyApiKey;
+  if (!apiKey) return null;
 
   if (!/^[A-Za-z0-9]{32,64}$/.test(apiKey)) {
     throw new Error("DD_API_KEY_INVALID");

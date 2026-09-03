@@ -308,6 +308,92 @@ describe("Supabase session Proxy", () => {
     );
   });
 
+  it.each(["/login", "/logout", "/api/session", "/api/status"])(
+    "keeps public path %s reachable without releasing an indeterminate refresh",
+    async (pathname) => {
+      const request = new NextRequest(`https://homerelay.test${pathname}`, {
+        headers: { cookie: "sb-synthetic-auth-token=current" },
+      });
+      mocks.getClaims.mockImplementation(async () => {
+        clientOptions?.cookies.setAll(
+          [
+            {
+              name: "sb-synthetic-auth-token",
+              options: { httpOnly: true, path: "/" },
+              value: "unchecked-refresh",
+            },
+          ],
+          { "x-unchecked-refresh": "blocked" },
+        );
+        return { data: null, error: { status: 503 } };
+      });
+
+      const response = await updateSession(request);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+      expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
+      expect(response.headers.get("x-unchecked-refresh")).toBeNull();
+      expect(request.cookies.get("sb-synthetic-auth-token")?.value).toBe(
+        "current",
+      );
+    },
+  );
+
+  it.each([
+    { expectedStatus: 200, pathname: "/api/session", publicPath: true },
+    { expectedStatus: 503, pathname: "/record", publicPath: false },
+  ])(
+    "fails $pathname according to its public boundary when guard verification throws",
+    async ({ expectedStatus, pathname, publicPath }) => {
+      const request = new NextRequest(`https://homerelay.test${pathname}`, {
+        headers: {
+          cookie: `${SESSION_GUARD_COOKIE_NAME}=v1:active:${"a".repeat(64)}; sb-synthetic-auth-token=current`,
+        },
+      });
+      mocks.getClaims.mockImplementation(async () => {
+        clientOptions?.cookies.setAll(
+          [
+            {
+              name: "sb-synthetic-auth-token",
+              options: { httpOnly: true, path: "/" },
+              value: "unchecked-refresh",
+            },
+          ],
+          { "x-unchecked-refresh": "blocked" },
+        );
+        return {
+          data: {
+            claims: {
+              session_id: "11111111-1111-4111-8111-111111111111",
+              sub: "synthetic-user",
+            },
+          },
+          error: null,
+        };
+      });
+      const digest = vi
+        .spyOn(globalThis.crypto.subtle, "digest")
+        .mockRejectedValueOnce(new Error("synthetic digest failure"));
+
+      try {
+        const response = await updateSession(request);
+
+        expect(response.status).toBe(expectedStatus);
+        expect(response.headers.get("x-middleware-next")).toBe(
+          publicPath ? "1" : null,
+        );
+        expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
+        expect(response.headers.get("x-unchecked-refresh")).toBeNull();
+        expect(request.cookies.get("sb-synthetic-auth-token")?.value).toBe(
+          "current",
+        );
+      } finally {
+        digest.mockRestore();
+      }
+    },
+  );
+
   it("makes signed-out authoritative without contacting Supabase", async () => {
     const request = new NextRequest("https://homerelay.test/", {
       headers: {

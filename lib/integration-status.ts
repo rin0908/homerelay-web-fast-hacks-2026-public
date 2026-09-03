@@ -35,12 +35,15 @@ export function getIntegrationStatus(): IntegrationStatus {
   const vendorIsolation = process.env.HOMERELAY_E2E_ISOLATE_VENDORS
     ?.trim()
     .toLowerCase();
+  const configuredDataMode = process.env.HOMERELAY_DATA_MODE
+    ?.trim()
+    .toLowerCase();
   const forcedDemo = demoMode === "true";
   const explicitLiveApp = demoMode === "false";
   const isolateVendors = vendorIsolation === "true";
   const requestedDataMode =
     !forcedDemo &&
-    (explicitLiveApp || process.env.HOMERELAY_DATA_MODE === "supabase")
+    (explicitLiveApp || configuredDataMode === "supabase")
       ? "supabase"
       : "demo";
   const openaiConfigured = hasEveryEnvironmentVariable([

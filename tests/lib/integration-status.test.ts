@@ -105,6 +105,33 @@ describe("getIntegrationStatus", () => {
     });
   });
 
+  it("normalizes the explicit Supabase data mode for every live integration", () => {
+    for (const name of ENV_NAMES) delete process.env[name];
+    process.env.HOMERELAY_DATA_MODE = " Supabase ";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "synthetic-publishable";
+    process.env.OPENAI_API_KEY = "synthetic-openai";
+    process.env.OPENAI_PROJECT_ID = "proj_synthetic_homerelay";
+    process.env.QDRANT_URL = "https://synthetic.qdrant.test";
+    process.env.QDRANT_API_KEY = "synthetic-qdrant-key";
+    process.env.NEO4J_URI = "neo4j+s://synthetic.databases.neo4j.io";
+    process.env.NEO4J_USERNAME = "neo4j";
+    process.env.NEO4J_PASSWORD = "synthetic-password";
+    process.env.DD_API_KEY = "a".repeat(32);
+    process.env.DD_SITE = "ap1.datadoghq.com";
+
+    expect(getIntegrationStatus()).toMatchObject({
+      appMode: "live",
+      dataMode: "supabase",
+      requestedDataMode: "supabase",
+      openai: { active: true, configured: true },
+      supabase: { active: true, configured: true },
+      qdrant: { active: true, configured: true },
+      neo4j: { active: true, configured: true },
+      datadog: { active: true, configured: true },
+    });
+  });
+
   it("never activates Qdrant outside authenticated Supabase mode", () => {
     for (const name of ENV_NAMES) delete process.env[name];
     process.env.QDRANT_URL = "https://synthetic.qdrant.test";

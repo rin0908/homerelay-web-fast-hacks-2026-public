@@ -33,6 +33,18 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.has(pathname) || pathname.startsWith("/login/");
 }
 
+function indeterminateSessionResponse(request: NextRequest): NextResponse {
+  // Public recovery and status routes must remain reachable when Auth cannot
+  // determine session state. Use a fresh response based only on the original
+  // request: buffered refresh cookies and headers have not been verified and
+  // must never cross this boundary.
+  return makePrivate(
+    isPublicPath(request.nextUrl.pathname)
+      ? NextResponse.next({ request })
+      : new NextResponse(null, { status: 503 }),
+  );
+}
+
 function makePrivate(response: NextResponse): NextResponse {
   response.headers.set(
     "Cache-Control",
@@ -185,7 +197,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     // Provider, SDK, and network uncertainty must not turn a still-valid
     // session into a logout. Do not release buffered refresh cookies either:
     // their session_id has not been checked against the active guard.
-    return makePrivate(new NextResponse(null, { status: 503 }));
+    return indeterminateSessionResponse(request);
   }
 
   const claims =
@@ -200,7 +212,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
       sessionIdFromClaims(claims),
     );
   } catch {
-    return makePrivate(new NextResponse(null, { status: 503 }));
+    return indeterminateSessionResponse(request);
   }
 
   if (!authenticated || !guardAllowsCurrentSession) {

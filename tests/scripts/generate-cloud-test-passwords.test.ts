@@ -19,6 +19,7 @@ const {
   atomicReplaceEnvFile,
   CLOUD_PASSWORD_KEYS,
   generateCloudTestPasswords,
+  upsertHiddenValues,
 } = passwordGenerator;
 
 async function withTemporaryWorkspace(
@@ -35,6 +36,17 @@ async function withTemporaryWorkspace(
 }
 
 describe("cloud test password storage", () => {
+  it("rejects keys outside the fixed cloud-password allowlist", () => {
+    const values = new Map([
+      [CLOUD_PASSWORD_KEYS[0], "synthetic-allowed"],
+      ["UNREVIEWED_SECRET", "synthetic-disallowed"],
+    ]);
+
+    expect(() => upsertHiddenValues("UNCHANGED=value\n", values)).toThrow(
+      "env_key_not_allowed",
+    );
+  });
+
   it("atomically replaces .env.local while preserving unrelated values", async () => {
     await withTemporaryWorkspace(async (workspace) => {
       const target = path.join(workspace, ".env.local");

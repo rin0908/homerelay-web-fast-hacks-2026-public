@@ -14,6 +14,13 @@ function makePassword() {
 }
 
 export function upsertHiddenValues(source, values) {
+  const allowedKeys = new Set(CLOUD_PASSWORD_KEYS);
+  for (const key of values.keys()) {
+    if (!allowedKeys.has(key)) {
+      throw new Error("env_key_not_allowed");
+    }
+  }
+
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
   const hadTrailingNewline = source.endsWith("\n");
   const lines = source.split(/\r?\n/);

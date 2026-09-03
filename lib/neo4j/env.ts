@@ -1,12 +1,15 @@
 import "server-only";
 
-export const DEFAULT_NEO4J_DATABASE = "neo4j";
+import {
+  DEFAULT_NEO4J_DATABASE,
+  resolveNeo4jDatabase,
+} from "@/lib/neo4j/database-resolution.mjs";
+
+export { DEFAULT_NEO4J_DATABASE };
 export const DEFAULT_NEO4J_TIMEOUT_MS = 4_000;
 
 const MIN_TIMEOUT_MS = 250;
 const MAX_TIMEOUT_MS = 15_000;
-const AURA_INSTANCE_HOST = /^([a-z0-9]{8})\.databases\.neo4j\.io$/i;
-const AURA_INSTANCE_USERNAME = /^[a-z0-9]{8}$/i;
 
 export type Neo4jEnvironment = {
   HOMERELAY_DATA_MODE?: string;
@@ -79,40 +82,6 @@ function parseTimeout(value: string | undefined): number | null {
     : null;
 }
 
-function resolveDatabase(
-  explicitDatabase: string | undefined,
-  uriValue: string,
-  username: string,
-): string {
-  const explicit = explicitDatabase?.trim();
-  if (explicit) return explicit;
-
-  try {
-    const uri = new URL(uriValue);
-    const hostMatch = AURA_INSTANCE_HOST.exec(uri.hostname);
-    const safeAuraUri =
-      (uri.protocol === "neo4j+s:" || uri.protocol === "https:") &&
-      uri.port === "" &&
-      !uri.username &&
-      !uri.password &&
-      !uri.search &&
-      !uri.hash &&
-      (uri.pathname === "" || uri.pathname === "/");
-    if (
-      safeAuraUri &&
-      hostMatch &&
-      AURA_INSTANCE_USERNAME.test(username) &&
-      hostMatch[1].toLowerCase() === username.toLowerCase()
-    ) {
-      return username;
-    }
-  } catch {
-    // The URL validator below rejects malformed values before configuration use.
-  }
-
-  return DEFAULT_NEO4J_DATABASE;
-}
-
 function queryApiUrl(value: string, database: string): string | null {
   try {
     const url = new URL(value);
@@ -155,11 +124,11 @@ export function getNeo4jConfig(
   const password = environment.NEO4J_PASSWORD ?? "";
   const username = environment.NEO4J_USERNAME?.trim() ?? "";
   const uriValue = environment.NEO4J_URI?.trim() ?? "";
-  const database = resolveDatabase(
-    environment.NEO4J_DATABASE,
-    uriValue,
+  const database = resolveNeo4jDatabase({
+    explicitDatabase: environment.NEO4J_DATABASE,
+    uri: uriValue,
     username,
-  );
+  });
   const timeoutMs = parseTimeout(environment.NEO4J_TIMEOUT_MS);
   const endpoint = queryApiUrl(uriValue, database);
 

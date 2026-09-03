@@ -48,11 +48,15 @@ function safeLogger() {
 
 describe("Datadog live verifier", () => {
   it("skips without credentials or outside explicit live mode before fetching", async () => {
+    const conflictingKey = { DATADOG_API_KEY: "b".repeat(32) };
     for (const environment of [
       { HOMERELAY_DATA_MODE: "supabase" },
-      liveEnvironment({ HOMERELAY_DATA_MODE: "demo" }),
-      liveEnvironment({ HOMERELAY_DEMO_MODE: "true" }),
-      liveEnvironment({ HOMERELAY_E2E_ISOLATE_VENDORS: "true" }),
+      liveEnvironment({ HOMERELAY_DATA_MODE: "demo", ...conflictingKey }),
+      liveEnvironment({ HOMERELAY_DEMO_MODE: "true", ...conflictingKey }),
+      liveEnvironment({
+        HOMERELAY_E2E_ISOLATE_VENDORS: "true",
+        ...conflictingKey,
+      }),
     ]) {
       const fetchImpl = vi.fn();
       await expect(
