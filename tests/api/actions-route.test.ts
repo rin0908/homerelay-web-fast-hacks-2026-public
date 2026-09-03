@@ -219,6 +219,10 @@ describe("POST /api/actions", () => {
     const response = await POST(request("claim_entry"));
 
     expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      completedCount: 0,
+      error: "ログインが必要です",
+    });
     expect(supabase.rpc).not.toHaveBeenCalled();
   });
 

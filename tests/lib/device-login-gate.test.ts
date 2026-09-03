@@ -1,8 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { getCurrentSession, notFound, redirect } = vi.hoisted(() => ({
+const { createClient, getClaims, getCurrentSession, notFound, redirect } = vi.hoisted(() => ({
+  createClient: vi.fn(),
+  getClaims: vi.fn(),
   getCurrentSession: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("synthetic_not_found");
@@ -13,6 +15,7 @@ const { getCurrentSession, notFound, redirect } = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({ notFound, redirect }));
+vi.mock("@/lib/supabase/server", () => ({ createClient }));
 vi.mock("@/lib/supabase/session", () => ({ getCurrentSession }));
 
 import {
@@ -20,11 +23,18 @@ import {
   redirectAuthenticatedDeviceLogin,
 } from "@/lib/device-login-gate";
 
-afterEach(() => {
-  vi.unstubAllEnvs();
+beforeEach(() => {
+  createClient.mockReset();
+  getClaims.mockReset();
   getCurrentSession.mockReset();
   notFound.mockClear();
   redirect.mockClear();
+  getClaims.mockResolvedValue({ data: null, error: null });
+  createClient.mockResolvedValue({ auth: { getClaims } });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("assertDeviceLoginAvailable", () => {
@@ -54,6 +64,10 @@ describe("redirectAuthenticatedDeviceLogin", () => {
   });
 
   it("sends an already authenticated member home without consuming a QR", async () => {
+    getClaims.mockResolvedValue({
+      data: { claims: { sub: "synthetic-user" } },
+      error: null,
+    });
     getCurrentSession.mockResolvedValue({
       member: { id: "synthetic-member" },
       sessionId: "synthetic-session",
@@ -64,5 +78,38 @@ describe("redirectAuthenticatedDeviceLogin", () => {
       "synthetic_redirect",
     );
     expect(redirect).toHaveBeenCalledWith("/");
+  });
+
+  it.each(["error result", "thrown error"])(
+    "fails closed when verified claims return an %s",
+    async (failureMode) => {
+      if (failureMode === "error result") {
+        getClaims.mockResolvedValue({
+          data: null,
+          error: new Error("synthetic claims error"),
+        });
+      } else {
+        getClaims.mockRejectedValue(new Error("synthetic claims failure"));
+      }
+
+      await expect(redirectAuthenticatedDeviceLogin()).rejects.toThrow(
+        "synthetic_not_found",
+      );
+      expect(getCurrentSession).not.toHaveBeenCalled();
+      expect(redirect).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed when verified Auth cannot resolve a current member", async () => {
+    getClaims.mockResolvedValue({
+      data: { claims: { sub: "synthetic-user" } },
+      error: null,
+    });
+    getCurrentSession.mockResolvedValue(null);
+
+    await expect(redirectAuthenticatedDeviceLogin()).rejects.toThrow(
+      "synthetic_not_found",
+    );
+    expect(redirect).not.toHaveBeenCalled();
   });
 });

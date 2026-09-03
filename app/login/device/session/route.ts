@@ -125,21 +125,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (guard.state !== "signed-out") {
       try {
         const current = await supabase.auth.getClaims();
+        if (current.error) return json(503, false);
         const currentUserId = current.data?.claims?.sub;
         const guardMatches = await sessionGuardAllows(
           guard,
           sessionIdFromClaims(current.data?.claims),
         );
         if (
-          !current.error &&
           typeof currentUserId === "string" &&
           guardMatches
         ) {
           return json(409, false);
         }
       } catch {
-        // Beginning an explicit one-time login may safely discard an
-        // unverifiable local session; it never grants access.
+        // An unverifiable current session may still be active. Do not mutate
+        // its guard or cookies until Auth can establish the current state.
+        return json(503, false);
       }
     }
 

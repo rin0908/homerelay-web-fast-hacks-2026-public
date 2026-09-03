@@ -69,7 +69,7 @@ function isEntryAction(action: ActionInput["action"]): action is EntryActionName
 
 function jsonError(message: string, status: number) {
   return NextResponse.json(
-    { error: message },
+    { completedCount: 0, error: message },
     { status, headers: { "Cache-Control": "no-store" } },
   );
 }

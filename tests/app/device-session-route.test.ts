@@ -112,6 +112,35 @@ describe("device session guard route", () => {
     expect(response.cookies.get(SESSION_GUARD_COOKIE_NAME)).toBeUndefined();
   });
 
+  it.each(["error result", "thrown error"])(
+    "does not clear an existing session when begin claims return an %s",
+    async (failureMode) => {
+      const guard = await activeSessionGuardValue(SESSION_ID);
+      if (failureMode === "error result") {
+        mocks.getClaims.mockResolvedValue({
+          data: null,
+          error: new Error("synthetic claims error"),
+        });
+      } else {
+        mocks.getClaims.mockRejectedValue(new Error("synthetic claims failure"));
+      }
+
+      const response = await POST(
+        request("begin", {
+          cookie: [
+            `${SESSION_GUARD_COOKIE_NAME}=${guard}`,
+            "sb-synthetic-auth-token=current",
+          ].join("; "),
+        }),
+      );
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ ok: false });
+      expect(response.cookies.get(SESSION_GUARD_COOKIE_NAME)).toBeUndefined();
+      expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
+    },
+  );
+
   it("completes only the exact verified user, role, membership, and session", async () => {
     mocks.getClaims.mockResolvedValue({
       data: { claims: { session_id: SESSION_ID, sub: AUTH_USER_ID } },

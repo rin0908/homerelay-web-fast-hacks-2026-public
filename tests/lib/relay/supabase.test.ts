@@ -393,6 +393,63 @@ describe("SupabaseRelay", () => {
     }
   });
 
+  it("blocks later batches when a non-2xx JSON body omits completedCount", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ error: "synthetic upstream failure" }, { status: 502 }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, fetch: fetchMock },
+    );
+
+    const first = Promise.allSettled([relay.acknowledge(entryId)]);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(first).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+
+    await expect(relay.claimEntry(entryId)).rejects.toMatchObject({
+      code: "ACTION_FAILED",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("allows a later batch after an explicit completedCount of zero", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { completedCount: 0, error: "synthetic guarded failure" },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, fetch: fetchMock },
+    );
+
+    const first = Promise.allSettled([relay.acknowledge(entryId)]);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(first).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+
+    const retry = relay.claimEntry(entryId);
+    await vi.advanceTimersByTimeAsync(0);
+    await retry;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("serializes a second flush behind an in-flight action request", async () => {
     vi.useFakeTimers();
     const harness = createHarness();

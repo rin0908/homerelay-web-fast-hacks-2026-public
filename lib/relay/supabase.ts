@@ -94,7 +94,7 @@ type PendingGuardedAction = {
   targetId: string;
 };
 
-function completedActionCount(payload: unknown, batchSize: number): number {
+function completedActionCount(payload: unknown, batchSize: number): number | null {
   if (
     !payload ||
     typeof payload !== "object" ||
@@ -103,7 +103,7 @@ function completedActionCount(payload: unknown, batchSize: number): number {
     Number(payload.completedCount) < 0 ||
     Number(payload.completedCount) > batchSize
   ) {
-    return 0;
+    return null;
   }
 
   return Number(payload.completedCount);
@@ -113,12 +113,12 @@ async function readCompletedActionCount(
   response: Response,
   batchSize: number,
 ): Promise<number> {
-  // A malformed but fully received payload means the server did not attest to
-  // any completed prefix, so zero is the conservative explicit result. A body
-  // read failure is different: the server may already have committed actions
-  // before the connection was lost. Let that transport error escape so the
-  // relay enters its outcome-uncertain state and blocks dependent transitions.
-  return completedActionCount(await response.json(), batchSize);
+  const count = completedActionCount(await response.json(), batchSize);
+  // Without a valid completedCount the server has not attested which prefix,
+  // if any, committed. Treat the outcome as uncertain just like a body-read
+  // failure so no dependent batch is sent before an authoritative list().
+  if (count === null) throw new SupabaseRelayError("ACTION_FAILED");
+  return count;
 }
 
 async function runActionRequestWithTimeout<T>(
