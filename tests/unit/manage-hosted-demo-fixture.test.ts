@@ -148,24 +148,39 @@ describe("hosted fixture configuration gate", () => {
         HOMERELAY_E2E_ISOLATE_VENDORS: "true",
       }),
     ).toEqual({ reason: "vendor_isolation_not_allowed", status: "invalid" });
-    expect(() =>
+    expect(
       loadHostedFixtureConfig({
         ...VALID_ENVIRONMENT,
         HOMERELAY_HOSTED_QDRANT_URL: "https://other.aws.cloud.qdrant.io",
       }),
-    ).toThrow("vendor_resource_pin_mismatch");
-    expect(() =>
+    ).toEqual({ reason: "vendor_resource_pin_mismatch", status: "invalid" });
+    expect(
       loadHostedFixtureConfig({
         ...VALID_ENVIRONMENT,
         HOMERELAY_HOSTED_QDRANT_COLLECTION: "other_collection",
       }),
-    ).toThrow("vendor_resource_pin_mismatch");
-    expect(() =>
+    ).toEqual({ reason: "vendor_resource_pin_mismatch", status: "invalid" });
+    expect(
       loadHostedFixtureConfig({
         ...VALID_ENVIRONMENT,
         HOMERELAY_HOSTED_NEO4J_DATABASE: "other_database",
       }),
-    ).toThrow("vendor_resource_pin_mismatch");
+    ).toEqual({ reason: "vendor_resource_pin_mismatch", status: "invalid" });
+  });
+
+  it("returns fixed invalid results when a vendor resource pin is malformed", () => {
+    expect(
+      loadHostedFixtureConfig({
+        ...VALID_ENVIRONMENT,
+        HOMERELAY_HOSTED_QDRANT_URL: "not-a-url",
+      }),
+    ).toEqual({ reason: "qdrant_url_invalid", status: "invalid" });
+    expect(
+      loadHostedFixtureConfig({
+        ...VALID_ENVIRONMENT,
+        HOMERELAY_HOSTED_NEO4J_URI: "not-a-uri",
+      }),
+    ).toEqual({ reason: "neo4j_uri_invalid", status: "invalid" });
   });
 
   it("never returns configured values while reporting missing names", () => {

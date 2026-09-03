@@ -40,6 +40,7 @@ function parsePreviewOrigin(value: string): URL {
 
 function allowedFixturePath(value: string): string {
   const workspaceRoot = realpathSync(process.cwd());
+  // Live synthetic audio is intentionally transient under this Git-ignored root.
   const ignoredFixtureRoot = path.join(workspaceRoot, ".vercel");
   const requested = path.resolve(workspaceRoot, value);
   const requestedStatus = lstatSync(requested);

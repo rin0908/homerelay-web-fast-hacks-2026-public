@@ -366,29 +366,29 @@ export function loadHostedFixtureConfig(environment = process.env) {
   try {
     qdrant = parseQdrantConfig(environment);
     neo4j = parseNeo4jConfig(environment);
+    assert(qdrant && neo4j, "vendor_config_required");
+    const qdrantPin = parseQdrantConfig({
+      QDRANT_API_KEY: environment.QDRANT_API_KEY,
+      QDRANT_COLLECTION: environment[HOSTED_FIXTURE_ENV.qdrantCollectionPin],
+      QDRANT_TIMEOUT_MS: environment.QDRANT_TIMEOUT_MS,
+      QDRANT_URL: environment[HOSTED_FIXTURE_ENV.qdrantUrlPin],
+    });
+    const neo4jPin = parseNeo4jConfig({
+      NEO4J_DATABASE: environment[HOSTED_FIXTURE_ENV.neo4jDatabasePin],
+      NEO4J_PASSWORD: environment.NEO4J_PASSWORD,
+      NEO4J_TIMEOUT_MS: environment.NEO4J_TIMEOUT_MS,
+      NEO4J_URI: environment[HOSTED_FIXTURE_ENV.neo4jUriPin],
+      NEO4J_USERNAME: environment.NEO4J_USERNAME,
+    });
+    assert(
+      qdrantPin?.url === qdrant.url &&
+        qdrantPin?.collection === qdrant.collection &&
+        neo4jPin?.endpoint === neo4j.endpoint,
+      "vendor_resource_pin_mismatch",
+    );
   } catch (error) {
     return Object.freeze({ reason: safeCode(error), status: "invalid" });
   }
-  assert(qdrant && neo4j, "vendor_config_required");
-  const qdrantPin = parseQdrantConfig({
-    QDRANT_API_KEY: environment.QDRANT_API_KEY,
-    QDRANT_COLLECTION: environment[HOSTED_FIXTURE_ENV.qdrantCollectionPin],
-    QDRANT_TIMEOUT_MS: environment.QDRANT_TIMEOUT_MS,
-    QDRANT_URL: environment[HOSTED_FIXTURE_ENV.qdrantUrlPin],
-  });
-  const neo4jPin = parseNeo4jConfig({
-    NEO4J_DATABASE: environment[HOSTED_FIXTURE_ENV.neo4jDatabasePin],
-    NEO4J_PASSWORD: environment.NEO4J_PASSWORD,
-    NEO4J_TIMEOUT_MS: environment.NEO4J_TIMEOUT_MS,
-    NEO4J_URI: environment[HOSTED_FIXTURE_ENV.neo4jUriPin],
-    NEO4J_USERNAME: environment.NEO4J_USERNAME,
-  });
-  assert(
-    qdrantPin?.url === qdrant.url &&
-      qdrantPin?.collection === qdrant.collection &&
-      neo4jPin?.endpoint === neo4j.endpoint,
-    "vendor_resource_pin_mismatch",
-  );
 
   return Object.freeze({
     config: Object.freeze({

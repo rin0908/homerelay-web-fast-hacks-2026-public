@@ -1,19 +1,33 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
-  createClient: vi.fn(),
+  clientOptions: null as {
+    cookies: {
+      getAll: () => { name: string; value: string }[];
+      setAll: (
+        cookies: {
+          name: string;
+          options: Record<string, unknown>;
+          value: string;
+        }[],
+        headers: Record<string, string>,
+      ) => void;
+    };
+  } | null,
+  createServerClient: vi.fn(),
   getClaims: vi.fn(),
-  getCurrentSession: vi.fn(),
+  resolveCurrentSession: vi.fn(),
   getSupabasePublicConfig: vi.fn(),
 }));
 
-vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
+vi.mock("@supabase/ssr", () => ({
+  createServerClient: mocks.createServerClient,
+}));
 vi.mock("@/lib/supabase/session", () => ({
-  getCurrentSession: mocks.getCurrentSession,
+  resolveCurrentSession: mocks.resolveCurrentSession,
 }));
 vi.mock("@/lib/supabase/env", () => ({
   getSupabasePublicConfig: mocks.getSupabasePublicConfig,
@@ -60,13 +74,18 @@ describe("device session guard route", () => {
       url: "https://synthetic.supabase.co",
     });
     mocks.getClaims.mockResolvedValue({ data: null, error: null });
-    mocks.createClient.mockResolvedValue({
-      auth: { getClaims: mocks.getClaims },
-    } as unknown as SupabaseClient);
-    mocks.getCurrentSession.mockResolvedValue({
-      member: { role: "helper" },
-      sessionId: SESSION_ID,
-      userId: AUTH_USER_ID,
+    mocks.clientOptions = null;
+    mocks.createServerClient.mockImplementation((_url, _key, options) => {
+      mocks.clientOptions = options;
+      return { auth: { getClaims: mocks.getClaims } };
+    });
+    mocks.resolveCurrentSession.mockResolvedValue({
+      session: {
+        member: { role: "helper" },
+        sessionId: SESSION_ID,
+        userId: AUTH_USER_ID,
+      },
+      state: "verified",
     });
   });
 
@@ -74,7 +93,7 @@ describe("device session guard route", () => {
     const response = await POST(request("begin", { origin: null }));
 
     expect(response.status).toBe(403);
-    expect(mocks.createClient).not.toHaveBeenCalled();
+    expect(mocks.createServerClient).not.toHaveBeenCalled();
   });
 
   it("begins a device CAS by setting signed-out and clearing only HomeRelay auth", async () => {
@@ -141,6 +160,56 @@ describe("device session guard route", () => {
     },
   );
 
+  it.each([401, 403])(
+    "does not treat an unknown begin status %i as signed-out",
+    async (status) => {
+      const guard = await activeSessionGuardValue(SESSION_ID);
+      mocks.getClaims.mockResolvedValue({ data: null, error: { status } });
+
+      const response = await POST(
+        request("begin", {
+          cookie: `${SESSION_GUARD_COOKIE_NAME}=${guard}; sb-synthetic-auth-token=current`,
+        }),
+      );
+
+      expect(response.status).toBe(503);
+      expect(response.cookies.get(SESSION_GUARD_COOKIE_NAME)).toBeUndefined();
+      expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
+    },
+  );
+
+  it("discards SDK cookie and header mutations when begin is indeterminate", async () => {
+    const guard = await activeSessionGuardValue(SESSION_ID);
+    const deviceRequest = request("begin", {
+      cookie: [
+        `${SESSION_GUARD_COOKIE_NAME}=${guard}`,
+        "sb-synthetic-auth-token=current",
+      ].join("; "),
+    });
+    mocks.getClaims.mockImplementation(async () => {
+      mocks.clientOptions?.cookies.setAll(
+        [
+          {
+            name: "sb-synthetic-auth-token",
+            options: { httpOnly: true, path: "/" },
+            value: "unchecked-refresh",
+          },
+        ],
+        { "x-unchecked-refresh": "blocked" },
+      );
+      return { data: null, error: { status: 429 } };
+    });
+
+    const response = await POST(deviceRequest);
+
+    expect(response.status).toBe(503);
+    expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
+    expect(response.headers.get("x-unchecked-refresh")).toBeNull();
+    expect(deviceRequest.cookies.get("sb-synthetic-auth-token")?.value).toBe(
+      "current",
+    );
+  });
+
   it("completes only the exact verified user, role, membership, and session", async () => {
     mocks.getClaims.mockResolvedValue({
       data: { claims: { session_id: SESSION_ID, sub: AUTH_USER_ID } },
@@ -160,16 +229,27 @@ describe("device session guard route", () => {
     expect(guard.state).toBe("active");
   });
 
-  it.each(["error result", "thrown error"])(
-    "fails closed when getClaims returns an %s during completion",
+  it.each(["resolved indeterminate", "thrown error"])(
+    "preserves cookies when completion is %s",
     async (failureMode) => {
-      if (failureMode === "error result") {
-        mocks.getClaims.mockResolvedValue({
-          data: { claims: { session_id: SESSION_ID, sub: AUTH_USER_ID } },
-          error: new Error("synthetic claims error"),
+      if (failureMode === "resolved indeterminate") {
+        mocks.resolveCurrentSession.mockImplementation(async () => {
+          mocks.clientOptions?.cookies.setAll(
+            [
+              {
+                name: "sb-synthetic-auth-token",
+                options: { httpOnly: true, path: "/" },
+                value: "unchecked-refresh",
+              },
+            ],
+            { "x-unchecked-refresh": "blocked" },
+          );
+          return { state: "indeterminate" };
         });
       } else {
-        mocks.getClaims.mockRejectedValue(new Error("synthetic claims failure"));
+        mocks.resolveCurrentSession.mockRejectedValue(
+          new Error("synthetic session failure"),
+        );
       }
 
       const response = await POST(
@@ -182,29 +262,18 @@ describe("device session guard route", () => {
         }),
       );
 
-      expect(response.status).toBe(401);
-      expect(
-        readSessionGuard(response.cookies.get(SESSION_GUARD_COOKIE_NAME)?.value)
-          .state,
-      ).toBe("signed-out");
-      expect(response.cookies.get("sb-synthetic-auth-token")?.maxAge).toBe(0);
+      expect(response.status).toBe(503);
+      expect(response.cookies.get(SESSION_GUARD_COOKIE_NAME)).toBeUndefined();
+      expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
+      expect(response.headers.get("x-unchecked-refresh")).toBeNull();
     },
   );
 
-  it.each([
-    {
-      body: { authUserId: "synthetic-other-user", expectedRole: "helper" },
-      name: "another user",
-    },
-    {
-      body: { authUserId: AUTH_USER_ID, expectedRole: "family" },
-      name: "another role",
-    },
-  ])("rejects $name between verification and completion", async ({ body }) => {
-    mocks.getClaims.mockResolvedValue({
-      data: { claims: { session_id: SESSION_ID, sub: AUTH_USER_ID } },
-      error: null,
-    });
+  it("rejects another user between verification and completion", async () => {
+    const body = {
+      authUserId: "synthetic-other-user",
+      expectedRole: "helper",
+    };
 
     const response = await POST(
       request("complete", {
@@ -217,6 +286,34 @@ describe("device session guard route", () => {
     expect(response.cookies.get(SESSION_GUARD_COOKIE_NAME)?.value).toBe(
       signedOutSessionGuardValue(),
     );
+  });
+
+  it("reports a confirmed role mismatch as forbidden", async () => {
+    const response = await POST(
+      request("complete", {
+        body: { authUserId: AUTH_USER_ID, expectedRole: "family" },
+        cookie: `${SESSION_GUARD_COOKIE_NAME}=${signedOutSessionGuardValue()}`,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.cookies.get(SESSION_GUARD_COOKIE_NAME)?.value).toBe(
+      signedOutSessionGuardValue(),
+    );
+  });
+
+  it("reports confirmed membership absence as forbidden", async () => {
+    mocks.resolveCurrentSession.mockResolvedValue({ state: "forbidden" });
+
+    const response = await POST(
+      request("complete", {
+        body: { authUserId: AUTH_USER_ID, expectedRole: "helper" },
+        cookie: `${SESSION_GUARD_COOKIE_NAME}=${signedOutSessionGuardValue()}`,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
   });
 
   it("rejects completion unless begin established signed-out first", async () => {
@@ -232,7 +329,7 @@ describe("device session guard route", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(mocks.getCurrentSession).not.toHaveBeenCalled();
+    expect(mocks.resolveCurrentSession).not.toHaveBeenCalled();
   });
 
   it("rejects an oversized completion body before parsing JSON", async () => {
@@ -247,6 +344,6 @@ describe("device session guard route", () => {
     );
 
     expect(response.status).toBe(413);
-    expect(mocks.getCurrentSession).not.toHaveBeenCalled();
+    expect(mocks.resolveCurrentSession).not.toHaveBeenCalled();
   });
 });

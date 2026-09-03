@@ -146,7 +146,7 @@ describe("AuthSessionBoundary", () => {
   });
 
   it("never reveals same-user DOM when the HttpOnly server guard rejects its session", async () => {
-    mocks.fetch.mockResolvedValue(new Response(null, { status: 307 }));
+    mocks.fetch.mockResolvedValue(new Response(null, { status: 401 }));
     render(
       <AuthSessionBoundary
         expectedAuthUserId="synthetic-expected-user"
@@ -168,7 +168,30 @@ describe("AuthSessionBoundary", () => {
     });
   });
 
-  it("fails closed when the authoritative server session request rejects", async () => {
+  it("treats an infrastructure redirect as indeterminate, not logout", async () => {
+    mocks.fetch.mockResolvedValue(new Response(null, { status: 307 }));
+    render(
+      <AuthSessionBoundary
+        expectedAuthUserId="synthetic-expected-user"
+        mode="supabase"
+      >
+        <p>synthetic private handoff</p>
+      </AuthSessionBoundary>,
+    );
+
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
+    expect(screen.queryByText("synthetic private handoff")).not.toBeInTheDocument();
+    expect(mocks.replace).not.toHaveBeenCalled();
+
+    mocks.fetch.mockImplementation(() => serverSessionResponse());
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("hides without logout and recovers on focus after a server request rejects", async () => {
     mocks.fetch.mockRejectedValue(new Error("synthetic server failure"));
     render(
       <AuthSessionBoundary
@@ -179,16 +202,25 @@ describe("AuthSessionBoundary", () => {
       </AuthSessionBoundary>,
     );
 
-    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/login"));
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledOnce());
     expect(
       screen.queryByText("synthetic private handoff"),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText("ログイン状態が変わりました。ログイン画面へ移動します。"),
+      screen.getByText("ログインを安全に確認しています…"),
     ).toBeInTheDocument();
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+
+    mocks.fetch.mockImplementation(() => serverSessionResponse());
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+    expect(mocks.replace).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the browser claims request rejects", async () => {
+  it("hides without logout and recovers on focus after browser claims reject", async () => {
     mocks.getClaims.mockRejectedValue(new Error("synthetic claims failure"));
     render(
       <AuthSessionBoundary
@@ -199,13 +231,81 @@ describe("AuthSessionBoundary", () => {
       </AuthSessionBoundary>,
     );
 
-    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/login"));
+    await waitFor(() => expect(mocks.getClaims).toHaveBeenCalledOnce());
     expect(
       screen.queryByText("synthetic private handoff"),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText("ログイン状態が変わりました。ログイン画面へ移動します。"),
+      screen.getByText("ログインを安全に確認しています…"),
     ).toBeInTheDocument();
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(mocks.getClaims).toHaveBeenCalledOnce();
+
+    mocks.getClaims.mockResolvedValue({
+      data: {
+        claims: {
+          session_id: SESSION_ID,
+          sub: "synthetic-expected-user",
+        },
+      },
+      error: null,
+    });
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 429, 503])(
+    "does not infer logout from an unknown Auth status %i",
+    async (status) => {
+      mocks.getClaims.mockResolvedValue({ data: null, error: { status } });
+      render(
+        <AuthSessionBoundary
+          expectedAuthUserId="synthetic-expected-user"
+          mode="supabase"
+        >
+          <p>synthetic private handoff</p>
+        </AuthSessionBoundary>,
+      );
+
+      await waitFor(() => expect(mocks.getClaims).toHaveBeenCalledOnce());
+      expect(screen.queryByText("synthetic private handoff")).not.toBeInTheDocument();
+      expect(mocks.replace).not.toHaveBeenCalled();
+
+      mocks.getClaims.mockResolvedValue({
+        data: {
+          claims: {
+            session_id: SESSION_ID,
+            sub: "synthetic-expected-user",
+          },
+        },
+        error: null,
+      });
+      act(() => window.dispatchEvent(new Event("focus")));
+
+      expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+      expect(mocks.getClaims).toHaveBeenCalledTimes(2);
+      expect(mocks.replace).not.toHaveBeenCalled();
+    },
+  );
+
+  it("redirects only for a documented terminal browser Auth error", async () => {
+    mocks.getClaims.mockResolvedValue({
+      data: null,
+      error: { code: "session_expired", status: 400 },
+    });
+    render(
+      <AuthSessionBoundary
+        expectedAuthUserId="synthetic-expected-user"
+        mode="supabase"
+      >
+        <p>synthetic private handoff</p>
+      </AuthSessionBoundary>,
+    );
+
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/login"));
+    expect(screen.queryByText("synthetic private handoff")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -437,6 +537,84 @@ describe("AuthSessionBoundary", () => {
       screen.queryByText("synthetic private handoff"),
     ).not.toBeInTheDocument();
     expect(mocks.getClaims.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("consumes one queued event after an in-flight indeterminate result", async () => {
+    render(
+      <AuthSessionBoundary
+        expectedAuthUserId="synthetic-expected-user"
+        mode="supabase"
+      >
+        <p>synthetic private handoff</p>
+      </AuthSessionBoundary>,
+    );
+    expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+
+    let releaseUnavailable!: () => void;
+    const unavailableCanFinish = new Promise<void>((resolve) => {
+      releaseUnavailable = resolve;
+    });
+    let unavailableStarted!: () => void;
+    const unavailableHasStarted = new Promise<void>((resolve) => {
+      unavailableStarted = resolve;
+    });
+    mocks.getClaims.mockImplementationOnce(async () => {
+      unavailableStarted();
+      await unavailableCanFinish;
+      return { data: null, error: { status: 503 } };
+    });
+
+    act(() => window.dispatchEvent(new Event("focus")));
+    await unavailableHasStarted;
+    act(() => window.dispatchEvent(new Event("pageshow")));
+    await act(async () => {
+      releaseUnavailable();
+      await unavailableCanFinish;
+    });
+
+    expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+    expect(mocks.getClaims).toHaveBeenCalledTimes(3);
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("rechecks a newer queued generation before accepting an old terminal response", async () => {
+    render(
+      <AuthSessionBoundary
+        expectedAuthUserId="synthetic-expected-user"
+        mode="supabase"
+      >
+        <p>synthetic private handoff</p>
+      </AuthSessionBoundary>,
+    );
+    expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+
+    let releaseOldResponse!: (response: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => {
+      releaseOldResponse = resolve;
+    });
+    let oldCheckStarted!: () => void;
+    const oldCheckHasStarted = new Promise<void>((resolve) => {
+      oldCheckStarted = resolve;
+    });
+    mocks.fetch.mockImplementationOnce(async () => {
+      oldCheckStarted();
+      return oldResponse;
+    });
+
+    act(() => window.dispatchEvent(new Event("focus")));
+    await oldCheckHasStarted;
+    expect(
+      screen.queryByText("synthetic private handoff"),
+    ).not.toBeInTheDocument();
+    act(() => window.dispatchEvent(new Event("pageshow")));
+    await act(async () => {
+      releaseOldResponse(new Response(null, { status: 401 }));
+      await oldResponse;
+    });
+
+    expect(await screen.findByText("synthetic private handoff")).toBeInTheDocument();
+    expect(mocks.fetch).toHaveBeenCalledTimes(3);
+    expect(mocks.replace).not.toHaveBeenCalled();
   });
 
   it("fails closed when a stale in-flight check sees a different user", async () => {

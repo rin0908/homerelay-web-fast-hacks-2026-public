@@ -3,7 +3,7 @@ import "server-only";
 import { notFound, redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentSession } from "@/lib/supabase/session";
+import { resolveCurrentSession } from "@/lib/supabase/session";
 
 export function assertDeviceLoginAvailable(): void {
   if (
@@ -15,22 +15,22 @@ export function assertDeviceLoginAvailable(): void {
 }
 
 export async function redirectAuthenticatedDeviceLogin(): Promise<void> {
-  const supabase = await createClient();
-  if (!supabase) notFound();
-
-  let claims: Awaited<ReturnType<typeof supabase.auth.getClaims>>;
+  let supabase: Awaited<ReturnType<typeof createClient>>;
   try {
-    claims = await supabase.auth.getClaims();
+    supabase = await createClient();
   } catch {
     notFound();
   }
-  if (claims.error) notFound();
-  if (!claims.data) return;
+  if (!supabase) notFound();
 
-  // Verified Auth claims must resolve to a valid member before this route can
-  // decide that the browser is unauthenticated. A provider or membership read
-  // failure therefore cannot expose a token-consuming login client.
-  if (!(await getCurrentSession(supabase))) notFound();
+  let resolution: Awaited<ReturnType<typeof resolveCurrentSession>>;
+  try {
+    resolution = await resolveCurrentSession(supabase);
+  } catch {
+    notFound();
+  }
+  if (resolution.state === "unauthenticated") return;
+  if (resolution.state !== "verified") notFound();
 
   // A QR must never replace an already authenticated member. Sending that
   // browser straight home also avoids presenting the protected 409 as a

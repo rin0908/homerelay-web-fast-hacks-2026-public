@@ -50,12 +50,12 @@ function runtime({
 }: {
   claimsUserId?: string | null;
   memberRole?: string | null;
-  membershipError?: Error | null;
+  membershipError?: unknown;
   persistentAccessToken?: string | null;
   persistentSignOutClears?: boolean;
   persistentSignOutError?: Error | null;
   setSessionError?: Error | null;
-  verifyError?: Error | null;
+  verifyError?: unknown;
 } = {}) {
   let currentPersistentSession = persistentAccessToken
     ? {
@@ -374,7 +374,7 @@ describe("one-time device login", () => {
 
   it("does not persist when Supabase rejects the one-time token", async () => {
     const testRuntime = runtime({
-      verifyError: new Error("synthetic rejection"),
+      verifyError: { code: "otp_expired", status: 403 },
     });
 
     await expect(
@@ -384,6 +384,23 @@ describe("one-time device login", () => {
     expect(testRuntime.setSession).not.toHaveBeenCalled();
     expect(testRuntime.verificationSignOut).toHaveBeenCalledOnce();
     expect(testRuntime.verificationDispose).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    new Error("synthetic unknown rejection"),
+    { status: 401 },
+    { status: 403 },
+    { code: "over_request_rate_limit", status: 429 },
+    { status: 503 },
+  ])("keeps an unrecognized OTP failure retryable: %o", async (verifyError) => {
+    const testRuntime = runtime({ verifyError });
+
+    await expect(
+      consumeDeviceMagicLink(testRuntime.clients, hash(), "helper"),
+    ).resolves.toBe("unavailable");
+    expect(testRuntime.verifyOtp).toHaveBeenCalledOnce();
+    expect(testRuntime.getClaims).not.toHaveBeenCalled();
+    expect(testRuntime.setSession).not.toHaveBeenCalled();
   });
 
   it("fails closed when verification omits session credentials", async () => {
@@ -411,10 +428,58 @@ describe("one-time device login", () => {
 
     await expect(
       consumeDeviceMagicLink(testRuntime.clients, hash(), "helper"),
-    ).resolves.toBe("membership");
+    ).resolves.toBe("unavailable");
     expect(testRuntime.setSession).not.toHaveBeenCalled();
     expect(testRuntime.verificationSignOut).toHaveBeenCalledOnce();
     expect(testRuntime.verificationDispose).toHaveBeenCalledOnce();
+  });
+
+  it("returns unavailable when claims cannot be verified", async () => {
+    const testRuntime = runtime();
+    testRuntime.getClaims.mockResolvedValue({
+      data: null,
+      error: { code: "over_request_rate_limit", status: 429 },
+    });
+
+    await expect(
+      consumeDeviceMagicLink(testRuntime.clients, hash(), "helper"),
+    ).resolves.toBe("unavailable");
+    expect(testRuntime.maybeSingle).not.toHaveBeenCalled();
+    expect(testRuntime.setSession).not.toHaveBeenCalled();
+  });
+
+  it("returns membership only for a confirmed absent member", async () => {
+    const testRuntime = runtime({ memberRole: null });
+
+    await expect(
+      consumeDeviceMagicLink(testRuntime.clients, hash(), "helper"),
+    ).resolves.toBe("membership");
+    expect(testRuntime.setSession).not.toHaveBeenCalled();
+  });
+
+  it("treats malformed membership data as unavailable", async () => {
+    const testRuntime = runtime();
+    testRuntime.maybeSingle.mockResolvedValue({
+      data: { auth_user_id: "synthetic-helper-user", id: null, role: "helper" },
+      error: null,
+    });
+
+    await expect(
+      consumeDeviceMagicLink(testRuntime.clients, hash(), "helper"),
+    ).resolves.toBe("unavailable");
+    expect(testRuntime.setSession).not.toHaveBeenCalled();
+  });
+
+  it("treats a thrown membership query as unavailable", async () => {
+    const testRuntime = runtime();
+    testRuntime.maybeSingle.mockRejectedValue(
+      new Error("synthetic membership transport failure"),
+    );
+
+    await expect(
+      consumeDeviceMagicLink(testRuntime.clients, hash(), "helper"),
+    ).resolves.toBe("unavailable");
+    expect(testRuntime.setSession).not.toHaveBeenCalled();
   });
 
   it("accepts the exact family membership on the family-only route", async () => {

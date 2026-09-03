@@ -9,6 +9,8 @@ import {
   type Page,
 } from "@playwright/test";
 
+// @ts-expect-error The shared executable .mjs resolver has no TypeScript declarations.
+import { resolveNeo4jDatabase } from "../../scripts/neo4j-connection.mjs";
 import {
   readVendorJson,
   TransientVendorReadbackError,
@@ -163,11 +165,11 @@ function neo4jEndpoint(): string {
     "neo4j_uri",
   );
   const username = requiredEnvironment("NEO4J_USERNAME");
-  const explicitDatabase = process.env.NEO4J_DATABASE?.trim();
-  const hostPrefix = /^([a-z0-9]{8})\.databases\.neo4j\.io$/i.exec(uri.hostname)?.[1];
-  const database =
-    explicitDatabase ||
-    (hostPrefix?.toLowerCase() === username.toLowerCase() ? username : "neo4j");
+  const database = resolveNeo4jDatabase({
+    explicitDatabase: process.env.NEO4J_DATABASE,
+    uri,
+    username,
+  });
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/.test(database)) {
     return fail("neo4j_database_invalid");
   }

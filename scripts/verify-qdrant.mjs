@@ -25,6 +25,8 @@ export function safeConfiguration(environment = process.env) {
   if (!urlValue || !apiKey) return null;
   if (
     environment.HOMERELAY_DEMO_MODE?.trim().toLowerCase() === "true" ||
+    environment.HOMERELAY_E2E_ISOLATE_VENDORS?.trim().toLowerCase() ===
+      "true" ||
     environment.HOMERELAY_DATA_MODE?.trim().toLowerCase() !== "supabase"
   ) {
     return null;

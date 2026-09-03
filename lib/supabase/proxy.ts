@@ -2,6 +2,10 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { createSupabaseAbortingFetch } from "@/lib/supabase/aborting-fetch";
+import {
+  classifyClaimsResult,
+  type ClaimsResolution,
+} from "@/lib/supabase/auth-resolution";
 import { getSupabasePublicConfig } from "@/lib/supabase/env";
 import {
   isHomeRelayAuthCookieName,
@@ -11,7 +15,12 @@ import {
   sessionIdFromClaims,
 } from "@/lib/supabase/session-guard";
 
-const PUBLIC_PATHS = new Set(["/api/status", "/login", "/logout"]);
+const PUBLIC_PATHS = new Set([
+  "/api/session",
+  "/api/status",
+  "/login",
+  "/logout",
+]);
 const DEVICE_SESSION_PATH = "/login/device/session";
 
 type BufferedCookie = {
@@ -164,22 +173,35 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     },
   });
 
-  let claims: Record<string, unknown> | null = null;
+  let claimsResolution: ClaimsResolution;
   try {
     const result = await supabase.auth.getClaims();
-    if (!result.error && result.data?.claims) {
-      claims = result.data.claims as Record<string, unknown>;
-    }
+    claimsResolution = classifyClaimsResult(result);
   } catch {
-    claims = null;
+    claimsResolution = { state: "indeterminate" };
   }
 
-  const authenticated =
-    typeof claims?.sub === "string" && claims.sub.length > 0;
-  const guardAllowsCurrentSession = await sessionGuardAllows(
-    guard,
-    sessionIdFromClaims(claims),
-  );
+  if (claimsResolution.state === "indeterminate") {
+    // Provider, SDK, and network uncertainty must not turn a still-valid
+    // session into a logout. Do not release buffered refresh cookies either:
+    // their session_id has not been checked against the active guard.
+    return makePrivate(new NextResponse(null, { status: 503 }));
+  }
+
+  const claims =
+    claimsResolution.state === "verified"
+      ? claimsResolution.value.claims
+      : null;
+  const authenticated = claimsResolution.state === "verified";
+  let guardAllowsCurrentSession: boolean;
+  try {
+    guardAllowsCurrentSession = await sessionGuardAllows(
+      guard,
+      sessionIdFromClaims(claims),
+    );
+  } catch {
+    return makePrivate(new NextResponse(null, { status: 503 }));
+  }
 
   if (!authenticated || !guardAllowsCurrentSession) {
     if (guard.state === "active") {

@@ -4,11 +4,9 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import type { RelayMode } from "@/lib/relay/types";
+import { classifyClaimsResult } from "@/lib/supabase/auth-resolution";
 import { createClient } from "@/lib/supabase/client";
-import {
-  fingerprintSessionId,
-  sessionIdFromClaims,
-} from "@/lib/supabase/session-guard";
+import { fingerprintSessionId } from "@/lib/supabase/session-guard";
 
 const SERVER_SESSION_CHECK_TIMEOUT_MS = 10_000;
 const SESSION_RECHECK_INTERVAL_MS = 60_000;
@@ -19,7 +17,12 @@ type AuthoritativeServerSession = {
   userId: string;
 };
 
-async function authoritativeServerSession(): Promise<AuthoritativeServerSession | null> {
+type IdentityResolution =
+  | { state: "indeterminate" }
+  | { state: "terminal" }
+  | { session: AuthoritativeServerSession; state: "verified" };
+
+async function authoritativeServerSession(): Promise<IdentityResolution> {
   const abortController = new AbortController();
   const timer = window.setTimeout(
     () => abortController.abort(),
@@ -32,7 +35,10 @@ async function authoritativeServerSession(): Promise<AuthoritativeServerSession 
       redirect: "manual",
       signal: abortController.signal,
     });
-    if (response.status !== 200) return null;
+    if (response.status === 401 || response.status === 403) {
+      return { state: "terminal" };
+    }
+    if (response.status !== 200) return { state: "indeterminate" };
     const body = (await response.json()) as {
       sessionFingerprint?: unknown;
       userId?: unknown;
@@ -44,12 +50,15 @@ async function authoritativeServerSession(): Promise<AuthoritativeServerSession 
       typeof body.sessionFingerprint === "string" &&
       SESSION_FINGERPRINT_PATTERN.test(body.sessionFingerprint)
       ? {
-          sessionFingerprint: body.sessionFingerprint,
-          userId: body.userId,
+          session: {
+            sessionFingerprint: body.sessionFingerprint,
+            userId: body.userId,
+          },
+          state: "verified",
         }
-      : null;
+      : { state: "indeterminate" };
   } catch {
-    return null;
+    return { state: "indeterminate" };
   } finally {
     window.clearTimeout(timer);
   }
@@ -82,12 +91,10 @@ export function AuthSessionBoundary({
     }
     const client = createClient();
     if (!client) {
-      const timer = window.setTimeout(() => {
-        setInvalidated(true);
-        router.replace("/login");
-        router.refresh();
-      }, 0);
-      return () => window.clearTimeout(timer);
+      // Missing runtime configuration is not evidence that an existing
+      // browser session ended. Keep private content hidden without deleting
+      // credentials or starting a redirect loop.
+      return;
     }
     const authenticatedClient = client;
 
@@ -105,37 +112,87 @@ export function AuthSessionBoundary({
       router.refresh();
     }
 
+    function hidePrivateContent() {
+      if (!active) return;
+      setVerifiedUserId(null);
+      setVerifiedSessionFingerprint(null);
+    }
+
+    async function browserSession(): Promise<IdentityResolution> {
+      try {
+        const current = classifyClaimsResult(
+          await authenticatedClient.auth.getClaims(),
+        );
+        if (current.state !== "verified") {
+          return {
+            state: current.state === "unauthenticated"
+              ? "terminal"
+              : "indeterminate",
+          };
+        }
+        const currentSessionFingerprint =
+          await fingerprintSessionId(current.value.sessionId);
+        if (!currentSessionFingerprint) return { state: "indeterminate" };
+        return {
+          session: {
+            sessionFingerprint: currentSessionFingerprint,
+            userId: current.value.userId,
+          },
+          state: "verified",
+        };
+      } catch {
+        return { state: "indeterminate" };
+      }
+    }
+
     async function runIdentityChecks(generation: number) {
       checking = true;
 
       while (active) {
-        let matchesExpectedIdentity = false;
-        try {
-          const [current, serverSession] = await Promise.all([
-            authenticatedClient.auth.getClaims(),
-            authoritativeServerSession(),
-          ]);
-          const currentClaims = current.data?.claims;
-          const currentUserId = currentClaims?.sub;
-          const currentSessionId = sessionIdFromClaims(currentClaims);
-          const currentSessionFingerprint = currentSessionId
-            ? await fingerprintSessionId(currentSessionId)
-            : null;
-          matchesExpectedIdentity =
-            !current.error &&
-            currentUserId === expectedAuthUserId &&
-            serverSession?.userId === expectedAuthUserId &&
-            currentSessionFingerprint !== null &&
-            currentSessionFingerprint === serverSession.sessionFingerprint &&
-            currentSessionFingerprint === expectedSessionFingerprint;
-        } catch {
-          matchesExpectedIdentity = false;
-        }
+        const [browser, server] = await Promise.all([
+          browserSession(),
+          authoritativeServerSession(),
+        ]);
 
         if (!active) break;
-        // A failed or different-user read is always terminal, even if a newer
-        // check was queued while this one was in flight. Generation ordering
-        // only controls which successful read may reveal private children.
+        // An auth/focus/pageshow event that happened after this request began
+        // may represent a refreshed session. Give that newer generation one
+        // authoritative check before treating an older 401/403 as terminal.
+        if (
+          (browser.state === "terminal" || server.state === "terminal") &&
+          generation !== latestGeneration &&
+          recheckQueued
+        ) {
+          recheckQueued = false;
+          generation = latestGeneration;
+          continue;
+        }
+        if (browser.state === "terminal" || server.state === "terminal") {
+          invalidate();
+          break;
+        }
+        if (
+          browser.state === "indeterminate" ||
+          server.state === "indeterminate"
+        ) {
+          // Do not turn a timeout, rate limit, provider outage, SDK exception,
+          // or malformed response into logout. The next interval, focus,
+          // pageshow, visibility, or auth event may recover the same session.
+          if (generation !== latestGeneration && recheckQueued) {
+            recheckQueued = false;
+            generation = latestGeneration;
+            continue;
+          }
+          hidePrivateContent();
+          break;
+        }
+
+        const matchesExpectedIdentity =
+          browser.session.userId === expectedAuthUserId &&
+          server.session.userId === expectedAuthUserId &&
+          browser.session.sessionFingerprint ===
+            server.session.sessionFingerprint &&
+          browser.session.sessionFingerprint === expectedSessionFingerprint;
         if (!matchesExpectedIdentity) {
           invalidate();
           break;
@@ -167,6 +224,9 @@ export function AuthSessionBoundary({
         recheckQueued = true;
         return;
       }
+      // A queued marker belongs only to the in-flight check that observed it.
+      // Never let it cause an unprompted rapid retry on a later event.
+      recheckQueued = false;
       void runIdentityChecks(generation);
     }
 

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ getCurrentSession: vi.fn() }));
+const mocks = vi.hoisted(() => ({ resolveCurrentSession: vi.fn() }));
 
 vi.mock("@/lib/supabase/session", () => ({
-  getCurrentSession: mocks.getCurrentSession,
+  resolveCurrentSession: mocks.resolveCurrentSession,
 }));
 
 import { GET } from "@/app/api/session/route";
@@ -15,10 +15,13 @@ describe("GET /api/session", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns the verified user and session fingerprint for a current invited membership", async () => {
-    mocks.getCurrentSession.mockResolvedValue({
-      member: { id: "synthetic-member" },
-      sessionId: SESSION_ID,
-      userId: "synthetic-user",
+    mocks.resolveCurrentSession.mockResolvedValue({
+      session: {
+        member: { id: "synthetic-member" },
+        sessionId: SESSION_ID,
+        userId: "synthetic-user",
+      },
+      state: "verified",
     });
 
     const response = await GET();
@@ -31,27 +34,46 @@ describe("GET /api/session", () => {
     expect(response.headers.get("cache-control")).toContain("no-store");
   });
 
-  it("rejects a missing or membership-deleted session", async () => {
-    mocks.getCurrentSession.mockResolvedValue(null);
+  it.each([
+    ["unauthenticated", 401],
+    ["forbidden", 403],
+    ["indeterminate", 503],
+  ])("maps %s to %i without caching", async (state, status) => {
+    mocks.resolveCurrentSession.mockResolvedValue({ state });
 
     const response = await GET();
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(status);
     expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+  });
+
+  it("maps an unexpected resolver exception to an uncached 503", async () => {
+    mocks.resolveCurrentSession.mockRejectedValue(
+      new Error("synthetic resolver failure"),
+    );
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toContain("no-store");
   });
 
   it.each(["short", "invalid session id", "x".repeat(257)])(
     "rejects an invalid verified session id: %s",
     async (sessionId) => {
-      mocks.getCurrentSession.mockResolvedValue({
-        member: { id: "synthetic-member" },
-        sessionId,
-        userId: "synthetic-user",
+      mocks.resolveCurrentSession.mockResolvedValue({
+        session: {
+          member: { id: "synthetic-member" },
+          sessionId,
+          userId: "synthetic-user",
+        },
+        state: "verified",
       });
 
       const response = await GET();
 
-      expect(response.status).toBe(401);
+      expect(response.status).toBe(503);
       expect(response.headers.get("cache-control")).toContain("no-store");
     },
   );

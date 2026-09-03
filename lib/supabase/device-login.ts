@@ -1,5 +1,6 @@
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 
+import { isClearlyInvalidOrExpiredOtpError } from "@/lib/supabase/auth-resolution";
 import {
   supportsAuthSessionLock,
   withAuthSessionLock,
@@ -81,7 +82,11 @@ async function authenticateDeviceMagicLink(
     type: "magiclink",
   });
   if (verification.error) {
-    return { outcome: "invalid" };
+    return {
+      outcome: isClearlyInvalidOrExpiredOtpError(verification.error)
+        ? "invalid"
+        : "unavailable",
+    };
   }
   const verifiedSession = verification.data.session;
   const accessToken = verifiedSession?.access_token;
@@ -97,7 +102,7 @@ async function authenticateDeviceMagicLink(
   const claims = await verificationClient.auth.getClaims();
   const authUserId = claims.data?.claims?.sub;
   if (claims.error || typeof authUserId !== "string" || !authUserId) {
-    return { outcome: "membership" };
+    return { outcome: "unavailable" };
   }
 
   const membershipOperation = verificationClient
@@ -107,15 +112,20 @@ async function authenticateDeviceMagicLink(
     .maybeSingle();
   const membership = await membershipOperation;
   const member = membership.data as MemberRow | null;
+  if (membership.error) return { outcome: "unavailable" };
+  if (!member) return { outcome: "membership" };
   if (
-    membership.error ||
-    !member ||
     typeof member.id !== "string" ||
-    member.auth_user_id !== authUserId ||
-    member.role !== expectedRole
+    !member.id ||
+    typeof member.auth_user_id !== "string" ||
+    (member.role !== "family" &&
+      member.role !== "relative" &&
+      member.role !== "helper") ||
+    member.auth_user_id !== authUserId
   ) {
-    return { outcome: "membership" };
+    return { outcome: "unavailable" };
   }
+  if (member.role !== expectedRole) return { outcome: "membership" };
 
   return {
     outcome: "verified",

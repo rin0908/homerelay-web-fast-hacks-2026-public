@@ -3,11 +3,12 @@ import { redirect } from "next/navigation";
 import { AuthSessionBoundary } from "@/components/AuthSessionBoundary";
 import { ArrowLeft, Camera, Check, Mic, Send } from "@/components/Icons";
 import { DemoModeBanner } from "@/components/DemoModeBanner";
+import { IndeterminateSessionRecovery } from "@/components/IndeterminateSessionRecovery";
 import { RecordFlow } from "@/components/RecordFlow";
 import { getIntegrationStatus } from "@/lib/integration-status";
 import { DEMO_HELPER_CONTEXT } from "@/lib/relay/contexts";
 import type { HandoffRelayContext, RelayMode } from "@/lib/relay/types";
-import { getCurrentSession } from "@/lib/supabase/session";
+import { resolveCurrentSession } from "@/lib/supabase/session";
 import { fingerprintSessionId } from "@/lib/supabase/session-guard";
 
 export default async function RecordPage({
@@ -44,8 +45,24 @@ export default async function RecordPage({
   let expectedSessionFingerprint: string | null = null;
   let mode: RelayMode = "demo";
   if (status.dataMode === "supabase") {
-    const session = await getCurrentSession();
-    if (!session) redirect("/login");
+    const resolution = await resolveCurrentSession();
+    if (
+      resolution.state === "unauthenticated" ||
+      resolution.state === "forbidden"
+    ) {
+      redirect("/login");
+    }
+    if (resolution.state === "indeterminate") {
+      return <SessionUnavailable />;
+    }
+    const { session } = resolution;
+    let fingerprint: string | null = null;
+    try {
+      fingerprint = await fingerprintSessionId(session.sessionId);
+    } catch {
+      fingerprint = null;
+    }
+    if (!fingerprint) return <SessionUnavailable />;
     context = {
       householdId: session.member.householdId,
       member: {
@@ -55,8 +72,7 @@ export default async function RecordPage({
       },
     };
     expectedAuthUserId = session.userId;
-    expectedSessionFingerprint = await fingerprintSessionId(session.sessionId);
-    if (!expectedSessionFingerprint) redirect("/login");
+    expectedSessionFingerprint = fingerprint;
     mode = "supabase";
   }
 
@@ -118,5 +134,21 @@ export default async function RecordPage({
       </div>
     </main>
     </AuthSessionBoundary>
+  );
+}
+
+function SessionUnavailable() {
+  return (
+    <main className="mx-auto min-h-screen w-full max-w-xl px-5 py-12" aria-live="polite">
+      <IndeterminateSessionRecovery />
+      <section className="soft-card p-6 text-center" role="alert">
+        <h1 className="text-xl font-semibold text-[var(--color-heading)]">
+          ログインを確認できませんでした
+        </h1>
+        <p className="mt-3 text-[var(--color-secondary)]">
+          通信が戻ると、自動でログインを再確認します。
+        </p>
+      </section>
+    </main>
   );
 }

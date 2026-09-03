@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentSession } from "@/lib/supabase/session";
+import { resolveCurrentSession } from "@/lib/supabase/session";
 import { fingerprintSessionId } from "@/lib/supabase/session-guard";
 
 function noStore(response: NextResponse): NextResponse {
@@ -14,18 +14,32 @@ function noStore(response: NextResponse): NextResponse {
 }
 
 export async function GET(): Promise<NextResponse> {
-  const session = await getCurrentSession();
-  if (!session) return noStore(new NextResponse(null, { status: 401 }));
+  try {
+    const resolution = await resolveCurrentSession();
+    if (resolution.state !== "verified") {
+      const status =
+        resolution.state === "unauthenticated"
+          ? 401
+          : resolution.state === "forbidden"
+            ? 403
+            : 503;
+      return noStore(new NextResponse(null, { status }));
+    }
 
-  const sessionFingerprint = await fingerprintSessionId(session.sessionId);
-  if (!sessionFingerprint) {
-    return noStore(new NextResponse(null, { status: 401 }));
+    const { session } = resolution;
+
+    const sessionFingerprint = await fingerprintSessionId(session.sessionId);
+    if (!sessionFingerprint) {
+      return noStore(new NextResponse(null, { status: 503 }));
+    }
+
+    return noStore(
+      NextResponse.json({
+        sessionFingerprint,
+        userId: session.userId,
+      }),
+    );
+  } catch {
+    return noStore(new NextResponse(null, { status: 503 }));
   }
-
-  return noStore(
-    NextResponse.json({
-      sessionFingerprint,
-      userId: session.userId,
-    }),
-  );
 }

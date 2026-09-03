@@ -215,6 +215,13 @@ describe("Qdrant live verifier cleanup", () => {
     {
       HOMERELAY_DATA_MODE: "supabase",
       HOMERELAY_DEMO_MODE: "false",
+      HOMERELAY_E2E_ISOLATE_VENDORS: "true",
+      QDRANT_API_KEY: "synthetic-qdrant-key",
+      QDRANT_URL: CONFIG.url,
+    },
+    {
+      HOMERELAY_DATA_MODE: "supabase",
+      HOMERELAY_DEMO_MODE: "false",
       QDRANT_URL: CONFIG.url,
     },
   ])("skips without constructing a client for %o", async (environment) => {

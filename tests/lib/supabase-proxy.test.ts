@@ -82,7 +82,15 @@ describe("Supabase session Proxy", () => {
         ],
         { "Cache-Control": "private, no-store" },
       );
-      return { data: { claims: { sub: "synthetic-user" } }, error: null };
+      return {
+        data: {
+          claims: {
+            session_id: "11111111-1111-4111-8111-111111111111",
+            sub: "synthetic-user",
+          },
+        },
+        error: null,
+      };
     });
 
     const response = await updateSession(request);
@@ -167,7 +175,7 @@ describe("Supabase session Proxy", () => {
   });
 
   it.each(["error result", "thrown error"])(
-    "rejects an active guard and clears HomeRelay auth when getClaims has an %s",
+    "preserves an active guard and cookies when getClaims has an indeterminate %s",
     async (failureMode) => {
       const guard = await activeSessionGuardValue(
         "11111111-1111-4111-8111-111111111111",
@@ -194,16 +202,111 @@ describe("Supabase session Proxy", () => {
 
       const response = await updateSession(request);
 
-      expect(response.status).toBe(307);
-      expect(response.headers.get("location")).toBe(
-        "https://homerelay.test/login",
-      );
-      expect(response.cookies.get("sb-synthetic-auth-token")?.value).toBe("");
-      expect(response.cookies.get("sb-synthetic-auth-token")?.maxAge).toBe(0);
+      expect(response.status).toBe(503);
+      expect(response.headers.get("location")).toBeNull();
+      expect(response.headers.get("cache-control")).toContain("no-store");
+      expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
       expect(response.cookies.get("sb-other-auth-token")).toBeUndefined();
       expect(response.cookies.get("unrelated")).toBeUndefined();
+      expect(request.cookies.get("sb-synthetic-auth-token")?.value).toBe(
+        "stale",
+      );
     },
   );
+
+  it.each([401, 403, 429, 503])(
+    "does not infer logout from an unknown status %i",
+    async (status) => {
+      const guard = await activeSessionGuardValue(
+        "11111111-1111-4111-8111-111111111111",
+      );
+      const request = new NextRequest("https://homerelay.test/record", {
+        headers: {
+          cookie: `${SESSION_GUARD_COOKIE_NAME}=${guard}; sb-synthetic-auth-token=current`,
+        },
+      });
+      mocks.getClaims.mockResolvedValue({ data: null, error: { status } });
+
+      const response = await updateSession(request);
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get("location")).toBeNull();
+      expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
+    },
+  );
+
+  it("clears an active session only for a documented terminal Auth error", async () => {
+    const guard = await activeSessionGuardValue(
+      "11111111-1111-4111-8111-111111111111",
+    );
+    const request = new NextRequest("https://homerelay.test/record", {
+      headers: {
+        cookie: `${SESSION_GUARD_COOKIE_NAME}=${guard}; sb-synthetic-auth-token=expired`,
+      },
+    });
+    mocks.getClaims.mockResolvedValue({
+      data: null,
+      error: { code: "session_expired", status: 400 },
+    });
+
+    const response = await updateSession(request);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://homerelay.test/login",
+    );
+    expect(response.cookies.get("sb-synthetic-auth-token")?.maxAge).toBe(0);
+  });
+
+  it("lets /api/session return its own status after clearing a terminal active session", async () => {
+    const guard = await activeSessionGuardValue(
+      "11111111-1111-4111-8111-111111111111",
+    );
+    const request = new NextRequest("https://homerelay.test/api/session", {
+      headers: {
+        cookie: `${SESSION_GUARD_COOKIE_NAME}=${guard}; sb-synthetic-auth-token=expired`,
+      },
+    });
+    mocks.getClaims.mockResolvedValue({
+      data: null,
+      error: { code: "session_expired", status: 400 },
+    });
+
+    const response = await updateSession(request);
+
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.cookies.get("sb-synthetic-auth-token")?.maxAge).toBe(0);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+  });
+
+  it("withholds buffered refresh cookies when claims are indeterminate", async () => {
+    const request = new NextRequest("https://homerelay.test/record", {
+      headers: { cookie: "sb-synthetic-auth-token=current" },
+    });
+    mocks.getClaims.mockImplementation(async () => {
+      clientOptions?.cookies.setAll(
+        [
+          {
+            name: "sb-synthetic-auth-token",
+            options: { httpOnly: true, path: "/" },
+            value: "unchecked-refresh",
+          },
+        ],
+        { "x-unchecked-refresh": "blocked" },
+      );
+      return { data: null, error: { status: 503 } };
+    });
+
+    const response = await updateSession(request);
+
+    expect(response.status).toBe(503);
+    expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
+    expect(response.headers.get("x-unchecked-refresh")).toBeNull();
+    expect(request.cookies.get("sb-synthetic-auth-token")?.value).toBe(
+      "current",
+    );
+  });
 
   it("makes signed-out authoritative without contacting Supabase", async () => {
     const request = new NextRequest("https://homerelay.test/", {
@@ -239,7 +342,10 @@ describe("Supabase session Proxy", () => {
   });
 
   it("redirects an unauthenticated protected request to login", async () => {
-    mocks.getClaims.mockResolvedValue({ data: null, error: new Error("expired") });
+    mocks.getClaims.mockResolvedValue({
+      data: null,
+      error: { code: "session_not_found", status: 400 },
+    });
     const request = new NextRequest("https://homerelay.test/record?from=demo");
 
     const response = await updateSession(request);
@@ -251,10 +357,13 @@ describe("Supabase session Proxy", () => {
     expect(response.headers.get("cache-control")).toContain("no-store");
   });
 
-  it.each(["/login", "/logout", "/api/status"])(
+  it.each(["/login", "/logout", "/api/session", "/api/status"])(
     "keeps the public path %s available without a session",
     async (pathname) => {
-      mocks.getClaims.mockResolvedValue({ data: null, error: null });
+      mocks.getClaims.mockResolvedValue({
+        data: null,
+        error: { name: "AuthSessionMissingError", status: 400 },
+      });
 
       const response = await updateSession(
         new NextRequest(`https://homerelay.test${pathname}`),

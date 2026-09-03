@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { createClient, getClaims, getCurrentSession, notFound, redirect } = vi.hoisted(() => ({
+const { createClient, notFound, redirect, resolveCurrentSession } = vi.hoisted(() => ({
   createClient: vi.fn(),
-  getClaims: vi.fn(),
-  getCurrentSession: vi.fn(),
+  resolveCurrentSession: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("synthetic_not_found");
   }),
@@ -16,7 +15,7 @@ const { createClient, getClaims, getCurrentSession, notFound, redirect } = vi.ho
 
 vi.mock("next/navigation", () => ({ notFound, redirect }));
 vi.mock("@/lib/supabase/server", () => ({ createClient }));
-vi.mock("@/lib/supabase/session", () => ({ getCurrentSession }));
+vi.mock("@/lib/supabase/session", () => ({ resolveCurrentSession }));
 
 import {
   assertDeviceLoginAvailable,
@@ -25,12 +24,11 @@ import {
 
 beforeEach(() => {
   createClient.mockReset();
-  getClaims.mockReset();
-  getCurrentSession.mockReset();
+  resolveCurrentSession.mockReset();
   notFound.mockClear();
   redirect.mockClear();
-  getClaims.mockResolvedValue({ data: null, error: null });
-  createClient.mockResolvedValue({ auth: { getClaims } });
+  resolveCurrentSession.mockResolvedValue({ state: "unauthenticated" });
+  createClient.mockResolvedValue({ synthetic: true });
 });
 
 afterEach(() => {
@@ -57,21 +55,18 @@ describe("assertDeviceLoginAvailable", () => {
 
 describe("redirectAuthenticatedDeviceLogin", () => {
   it("keeps an unauthenticated browser on the one-time login page", async () => {
-    getCurrentSession.mockResolvedValue(null);
-
     await expect(redirectAuthenticatedDeviceLogin()).resolves.toBeUndefined();
     expect(redirect).not.toHaveBeenCalled();
   });
 
   it("sends an already authenticated member home without consuming a QR", async () => {
-    getClaims.mockResolvedValue({
-      data: { claims: { sub: "synthetic-user" } },
-      error: null,
-    });
-    getCurrentSession.mockResolvedValue({
-      member: { id: "synthetic-member" },
-      sessionId: "synthetic-session",
-      userId: "synthetic-user",
+    resolveCurrentSession.mockResolvedValue({
+      session: {
+        member: { id: "synthetic-member" },
+        sessionId: "synthetic-session",
+        userId: "synthetic-user",
+      },
+      state: "verified",
     });
 
     await expect(redirectAuthenticatedDeviceLogin()).rejects.toThrow(
@@ -80,32 +75,22 @@ describe("redirectAuthenticatedDeviceLogin", () => {
     expect(redirect).toHaveBeenCalledWith("/");
   });
 
-  it.each(["error result", "thrown error"])(
-    "fails closed when verified claims return an %s",
-    async (failureMode) => {
-      if (failureMode === "error result") {
-        getClaims.mockResolvedValue({
-          data: null,
-          error: new Error("synthetic claims error"),
-        });
-      } else {
-        getClaims.mockRejectedValue(new Error("synthetic claims failure"));
-      }
+  it.each(["indeterminate", "forbidden"])(
+    "fails closed for a %s session resolution",
+    async (state) => {
+      resolveCurrentSession.mockResolvedValue({ state });
 
       await expect(redirectAuthenticatedDeviceLogin()).rejects.toThrow(
         "synthetic_not_found",
       );
-      expect(getCurrentSession).not.toHaveBeenCalled();
       expect(redirect).not.toHaveBeenCalled();
     },
   );
 
-  it("fails closed when verified Auth cannot resolve a current member", async () => {
-    getClaims.mockResolvedValue({
-      data: { claims: { sub: "synthetic-user" } },
-      error: null,
-    });
-    getCurrentSession.mockResolvedValue(null);
+  it("fails closed when the session resolver throws", async () => {
+    resolveCurrentSession.mockRejectedValue(
+      new Error("synthetic session failure"),
+    );
 
     await expect(redirectAuthenticatedDeviceLogin()).rejects.toThrow(
       "synthetic_not_found",

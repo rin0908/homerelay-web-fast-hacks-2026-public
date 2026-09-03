@@ -1,9 +1,14 @@
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { readBoundedRequest } from "@/lib/http/bounded-request";
+import { createSupabaseAbortingFetch } from "@/lib/supabase/aborting-fetch";
+import {
+  classifyClaimsResult,
+  isClearlyUnauthenticatedAuthError,
+} from "@/lib/supabase/auth-resolution";
 import { getSupabasePublicConfig } from "@/lib/supabase/env";
-import { createClient } from "@/lib/supabase/server";
-import { getCurrentSession } from "@/lib/supabase/session";
+import { resolveCurrentSession } from "@/lib/supabase/session";
 import {
   activeSessionGuardValue,
   isHomeRelayAuthCookieName,
@@ -11,7 +16,6 @@ import {
   SESSION_GUARD_COOKIE_NAME,
   SESSION_GUARD_COOKIE_OPTIONS,
   sessionGuardAllows,
-  sessionIdFromClaims,
   signedOutSessionGuardValue,
 } from "@/lib/supabase/session-guard";
 
@@ -29,12 +33,35 @@ function json(status: number, ok: boolean): NextResponse {
   return noStore(NextResponse.json({ ok }, { status }));
 }
 
+type BufferedCookie = {
+  name: string;
+  options: CookieOptions;
+  value: string;
+};
+
+function applyBufferedCookies(
+  response: NextResponse,
+  pendingCookies: readonly BufferedCookie[],
+  pendingHeaders: ReadonlyMap<string, string>,
+): NextResponse {
+  pendingCookies.forEach(({ name, options, value }) => {
+    response.cookies.set(name, value, options);
+  });
+  pendingHeaders.forEach((value, name) => response.headers.set(name, value));
+  return response;
+}
+
 function clearHomeRelayAuthCookies(
   request: NextRequest,
   response: NextResponse,
   supabaseUrl: string,
+  additionalNames: readonly string[] = [],
 ): void {
-  request.cookies.getAll().forEach(({ name }) => {
+  const names = new Set([
+    ...request.cookies.getAll().map(({ name }) => name),
+    ...additionalNames,
+  ]);
+  names.forEach((name) => {
     if (!isHomeRelayAuthCookieName(name, supabaseUrl)) return;
     response.cookies.set(name, "", {
       httpOnly: true,
@@ -58,10 +85,16 @@ function rejectSession(
   request: NextRequest,
   supabaseUrl: string,
   status = 401,
+  additionalCookieNames: readonly string[] = [],
 ): NextResponse {
   const response = json(status, false);
   markSignedOut(response);
-  clearHomeRelayAuthCookies(request, response, supabaseUrl);
+  clearHomeRelayAuthCookies(
+    request,
+    response,
+    supabaseUrl,
+    additionalCookieNames,
+  );
   return response;
 }
 
@@ -113,8 +146,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const config = getSupabasePublicConfig();
-  const supabase = await createClient();
-  if (!config || !supabase) return json(503, false);
+  if (!config) return json(503, false);
+
+  let pendingCookies: BufferedCookie[] = [];
+  const pendingHeaders = new Map<string, string>();
+  const supabase = createServerClient(config.url, config.publishableKey, {
+    global: { fetch: createSupabaseAbortingFetch() },
+    cookies: {
+      getAll: () => request.cookies.getAll(),
+      setAll: (cookiesToSet, headers) => {
+        pendingCookies = cookiesToSet;
+        Object.entries(headers).forEach(([name, value]) => {
+          pendingHeaders.set(name, value);
+        });
+      },
+    },
+  });
 
   const guard = readSessionGuard(
     request.cookies.get(SESSION_GUARD_COOKIE_NAME)?.value,
@@ -125,17 +172,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (guard.state !== "signed-out") {
       try {
         const current = await supabase.auth.getClaims();
-        if (current.error) return json(503, false);
-        const currentUserId = current.data?.claims?.sub;
-        const guardMatches = await sessionGuardAllows(
-          guard,
-          sessionIdFromClaims(current.data?.claims),
-        );
-        if (
-          typeof currentUserId === "string" &&
-          guardMatches
-        ) {
-          return json(409, false);
+        if (current.error && !isClearlyUnauthenticatedAuthError(current.error)) {
+          return json(503, false);
+        }
+        if (!current.error) {
+          const currentResolution = classifyClaimsResult(current);
+          if (currentResolution.state === "indeterminate") {
+            return json(503, false);
+          }
+          if (currentResolution.state === "verified") {
+            const guardMatches = await sessionGuardAllows(
+              guard,
+              currentResolution.value.sessionId,
+            );
+            if (guardMatches) {
+              return applyBufferedCookies(
+                json(409, false),
+                pendingCookies,
+                pendingHeaders,
+              );
+            }
+          }
         }
       } catch {
         // An unverifiable current session may still be active. Do not mutate
@@ -164,22 +221,45 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const session = await getCurrentSession(supabase);
-    const claims = await supabase.auth.getClaims();
-    const authUserId = claims.data?.claims?.sub;
-    const sessionId = sessionIdFromClaims(claims.data?.claims);
-    const guardValue =
-      session &&
-      !claims.error &&
-      authUserId === expected.value.authUserId &&
-      session.userId === expected.value.authUserId &&
-      session.sessionId === sessionId &&
-      session.member.role === expected.value.expectedRole &&
-      sessionId
-        ? await activeSessionGuardValue(sessionId)
-        : null;
+    const resolution = await resolveCurrentSession(supabase);
+    if (resolution.state === "indeterminate") return json(503, false);
+    if (resolution.state === "unauthenticated") {
+      return rejectSession(
+        request,
+        config.url,
+        401,
+        pendingCookies.map(({ name }) => name),
+      );
+    }
+    if (resolution.state === "forbidden") {
+      return rejectSession(
+        request,
+        config.url,
+        403,
+        pendingCookies.map(({ name }) => name),
+      );
+    }
 
-    if (!guardValue) return rejectSession(request, config.url);
+    const { session } = resolution;
+    if (session.member.role !== expected.value.expectedRole) {
+      return rejectSession(
+        request,
+        config.url,
+        403,
+        pendingCookies.map(({ name }) => name),
+      );
+    }
+    if (session.userId !== expected.value.authUserId) {
+      return rejectSession(
+        request,
+        config.url,
+        401,
+        pendingCookies.map(({ name }) => name),
+      );
+    }
+
+    const guardValue = await activeSessionGuardValue(session.sessionId);
+    if (!guardValue) return json(503, false);
 
     const response = json(200, true);
     response.cookies.set(
@@ -187,8 +267,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       guardValue,
       SESSION_GUARD_COOKIE_OPTIONS,
     );
-    return response;
+    return applyBufferedCookies(response, pendingCookies, pendingHeaders);
   } catch {
-    return rejectSession(request, config.url);
+    return json(503, false);
   }
 }
