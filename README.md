@@ -265,15 +265,17 @@ Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY_AUDIO
 
 `f996dc6…`ではさらに、遅延`Set-Cookie`と並行ログイン／ログアウトをHttpOnly session guard、server session fingerprint、共有Web Lockでfail closedにし、曖昧なaction応答後の依存batchを止めてSupabase正本のread-backでのみ解除するよう強化しました。同HEADへの[CodeRabbit最終増分review](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1#pullrequestreview-5090633444)は完了し、actionable 9件を取得しました。対応commit `76500b98f1f91ad3bab80c915aa73f90156538b3`で9件を修正し、その25ファイル差分のfollow-up reviewはactionable 0件でした。その後、`209f05a…`へのreviewで、認証確認不能時にdevice loginへ進める1件と、outside-diffの不正な`completedCount`を確定失敗として扱う問題を確認しました。両方をcommit `a4bb941226f095be236023b0e7a5bb5b7e1c2236`でfail closedに修正し、[8ファイル増分の再review](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1#issuecomment-5520259638)は`success`、actionable 0件で完了しました。Docstring Coverage 0% / 80%のpre-merge warning 1件は機能・安全性の指摘ではないスタイル指標として受容しています。最新コードはlint、typecheck、68 files / 590 unit tests、16 synthetic E2E（live-only 2件はcleanup済み外部fixtureを再作成しないため意図的skip）、Next.js 16.3.3 production build、privacy／secret監査、`git diff --check`に合格しています。PRはOPEN・未mergeです。
 
-### 2026-09-03 最新Preview再受入
+### 2026-09-03 現行runtimeの最終物理再試験
 
-実iPhoneの訪問ヘルパー画面と別Windows PCの家族画面で、Preview source commit `23138b0d88ebd6029c55d42dc261c301ce45ec15`の中心導線を再確認しました。最新試験1は60秒以内（正確な秒数は未記録）、最新試験2は42秒で、2回連続して写真、音声、OpenAI下書き、本人確認前の非共有、確認後のSupabase保存、Realtime反映、`見ました`→`私がやります`→`できました`、`買います`→`買いました`、Qdrant候補表示まで完了しました。
+PRの試験前HEAD `5c5c869aa5f050967a7aa16edbfa956658b549e2`は、runtime commit `a4bb941226f095be236023b0e7a5bb5b7e1c2236`の直上にある4文書だけのcommitで、実行コード・設定・依存関係の差分は0件です。再利用したVercel Preview `https://homerelay-web-fast-hacks-2026-5z2pdu5ts-o9da23e-1271s-projects.vercel.app`はREADYで、immutable deployment metadataの`homerelayCommit`が`a4bb941…`、`homerelayBranch`が`codex/openai-live-verification`であることを確認しました。
 
-同Previewのruntime read-backでは、`POST /api/draft` 1件が200、`POST /api/entries` 1件が201、`POST /api/actions` 5件が204、関連候補取得が200で、runtime errorは0件でした。Neo4j同期はruntimeから予約され、Neo4j自体のwrite/read-back・世帯分離は既存live verifierと後述するcleanup前read-backで確認済みです。
+この現行runtimeを、実iPhoneの訪問ヘルパー画面と別Windows PCの家族画面で2回連続試験しました。試験1は正確に60秒、試験2は56秒です。両方とも写真、音声、OpenAI live下書き、本人確認前の非共有、確認後のSupabase保存、WindowsへのRealtime反映、`見ました`→`私がやります`→`できました`、`買います`→`買いました`をエラーなしで完了しました。試験1の新カードは10秒以内に届き、初回のためQdrantは正常な「候補なし」でした。試験2は7秒以内に届き、Qdrantのlive検索結果として類似候補1件を表示しました。以前の`23138b0…`での60秒以内／42秒結果は履歴として保持しますが、今回の合格根拠には使用していません。
 
-その後のfail-closed認証・action回復修正commit `a4bb941226f095be236023b0e7a5bb5b7e1c2236`は、新しいPreviewへ配備し、READY、build成功、runtime error 0件、招待済みメンバー向け`/login`入口200、390px viewport設定を確認しました。Preview URLは `https://homerelay-web-fast-hacks-2026-5z2pdu5ts-o9da23e-1271s-projects.vercel.app` です。物理2端末の60秒以内／42秒結果は`23138b0…`へ帰属し、`a4bb941…`へ物理再試験済みとは帰属しません。後続修正は失敗時のfail-closed処理であり、成功導線はローカル全検証とPreview起動確認に合格しています。
+cleanup前のserver-side read-backでは、Supabaseに完了済みentry 2、購入済みneeded item 2、各entryの3操作を表すacknowledgement 6、private Storage object 2があり、別世帯entry／itemは0でした。Qdrantにはhandoff 2＋needed item 2の計4 pointsがあり、同世帯の類似候補1件、別世帯point／検索結果0を確認しました。Neo4jにはnode 8／relationship 24があり、完了handoff 2、購入済みitem 2、handoff action 6、purchase action 4、`ASSIGNED_TO` 2、`PURCHASE_ASSIGNEE` 2、別世帯handoff／item 0を確認しました。
 
-最終物理試験後、固定ledgerが指す合成fixtureだけを一度cleanupしました。cleanup前はSupabase Auth 3、`households` 2、`members` 3、`entries` 2、`needed_items` 2、`acknowledgements` 6、Storage 1、Qdrant fixture point 1、Neo4j fixture node 9／relationship 24でした。直後と2秒後の独立read-backは、これらすべて0件でした。3つの合成パスワード、一度限りQR、fixture ledger、配備用一時ファイルも削除済みです。
+その後、固定ledgerが指すHomeRelay合成fixtureだけを一度cleanupしました。cleanup直後と2秒後の検証器read-backに加え、独立した全体read-backを直後とさらに2秒後に行い、Supabase Auth、`households`、`members`、`entries`、`needed_items`、`acknowledgements`、Storage、Qdrant collection、Neo4j HomeRelay graphのnode／relationshipがすべて0件であることを確認しました。3つの一時合成パスワード、一度限りQR、fixture ledger、一時配備ファイルも削除済みです。
+
+この証拠更新後の候補は、lint、typecheck、集中4ファイル／65 tests、全unit 68ファイル／590 tests、synthetic E2E 16件（live-only 2件は意図的skip）、Next.js 16.3.3 production build、215公開候補ファイル／到達可能Git履歴／43 browser配信ファイルのprivacy・secret監査、production dependency audit 0件、`git diff --check`に合格しました。
 
 ### Qdrant / Neo4j live検証（2026-08-30）
 
