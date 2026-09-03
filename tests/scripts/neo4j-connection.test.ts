@@ -70,6 +70,14 @@ describe("Neo4j script connection rules", () => {
       },
       false,
     ],
+    [{}, false],
+    [
+      {
+        HOMERELAY_DATA_MODE: "demo",
+        HOMERELAY_DEMO_MODE: "false",
+      },
+      false,
+    ],
   ])("resolves live mode for %o", (environment, expected) => {
     expect(connection.isNeo4jLiveMode(environment)).toBe(expected);
   });

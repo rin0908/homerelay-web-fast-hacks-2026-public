@@ -98,5 +98,11 @@ describe("OpenAI request guard", () => {
         memberId: "bad\nmember",
       }),
     ).toMatchObject({ status: "rate_limited" });
+    expect(
+      acquireOpenAIRequestSlot({
+        householdId: "bad\nhousehold",
+        memberId: MEMBER_A,
+      }),
+    ).toMatchObject({ status: "rate_limited" });
   });
 });

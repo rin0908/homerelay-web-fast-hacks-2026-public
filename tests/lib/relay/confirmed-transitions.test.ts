@@ -40,7 +40,9 @@ describe("confirmed relay transitions", () => {
       status: "purchase_intent",
       updatedAt: "2026-09-01T06:00:00.000Z",
     });
-    expect(updated[0]!.neededItems[1]).toEqual(source[0]!.neededItems[1]);
+    const untouchedItem = source[0]!.neededItems[1];
+    expect(untouchedItem).toBeDefined();
+    expect(updated[0]!.neededItems[1]).toEqual(untouchedItem);
   });
 
   it("preserves the existing array when no target exists", () => {

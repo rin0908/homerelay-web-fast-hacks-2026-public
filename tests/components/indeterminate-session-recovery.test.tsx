@@ -58,5 +58,13 @@ describe("IndeterminateSessionRecovery", () => {
 
     view.unmount();
     expect(mocks.unsubscribe).toHaveBeenCalledOnce();
+
+    act(() => {
+      vi.advanceTimersByTime(2 * 60_000);
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("pageshow"));
+      mocks.authCallback?.("TOKEN_REFRESHED");
+    });
+    expect(mocks.refresh).toHaveBeenCalledTimes(3);
   });
 });

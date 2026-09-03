@@ -1,9 +1,11 @@
 import {
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -81,6 +83,50 @@ describe("cloud test password storage", () => {
       if (process.platform !== "win32") {
         expect((await stat(target)).mode & 0o777).toBe(0o600);
       }
+    });
+  });
+
+  it("rejects an env file alias outside the fixed .env.local target", async () => {
+    await withTemporaryWorkspace(async (workspace) => {
+      await writeFile(path.join(workspace, ".env.local"), "CURRENT=value\n", {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+
+      await expect(
+        generateCloudTestPasswords({ workspace, envFile: ".env.test" }),
+      ).rejects.toThrow("env_target_not_allowed");
+
+      expect(await readFile(path.join(workspace, ".env.local"), "utf8")).toBe(
+        "CURRENT=value\n",
+      );
+    });
+  });
+
+  it("rejects a non-regular .env.local target", async () => {
+    await withTemporaryWorkspace(async (workspace) => {
+      await mkdir(path.join(workspace, ".env.local"));
+
+      await expect(generateCloudTestPasswords({ workspace })).rejects.toThrow(
+        "env_target_not_regular_file",
+      );
+    });
+  });
+
+  it("rejects a symbolic-link .env.local target", async () => {
+    await withTemporaryWorkspace(async (workspace) => {
+      const actualTarget = path.join(workspace, "actual-env");
+      const linkedTarget = path.join(workspace, ".env.local");
+      await mkdir(actualTarget);
+      await symlink(
+        actualTarget,
+        linkedTarget,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+
+      await expect(generateCloudTestPasswords({ workspace })).rejects.toThrow(
+        "env_target_not_regular_file",
+      );
     });
   });
 

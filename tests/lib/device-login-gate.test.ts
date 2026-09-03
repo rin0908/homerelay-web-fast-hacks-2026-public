@@ -59,6 +59,23 @@ describe("redirectAuthenticatedDeviceLogin", () => {
     expect(redirect).not.toHaveBeenCalled();
   });
 
+  it.each(["throws", "returns null"] as const)(
+    "fails closed when the server client factory %s",
+    async (failureMode) => {
+      if (failureMode === "throws") {
+        createClient.mockRejectedValue(new Error("synthetic client failure"));
+      } else {
+        createClient.mockResolvedValue(null);
+      }
+
+      await expect(redirectAuthenticatedDeviceLogin()).rejects.toThrow(
+        "synthetic_not_found",
+      );
+      expect(resolveCurrentSession).not.toHaveBeenCalled();
+      expect(redirect).not.toHaveBeenCalled();
+    },
+  );
+
   it("sends an already authenticated member home without consuming a QR", async () => {
     resolveCurrentSession.mockResolvedValue({
       session: {

@@ -6,7 +6,10 @@ import {
   SYNTHETIC_AI_DRAFT,
   type HandoffDraft,
 } from "@/lib/ai/draft";
-import { createHandoffDraft } from "@/lib/ai/openai-draft";
+import {
+  createHandoffDraft,
+  OpenAIDraftError,
+} from "@/lib/ai/openai-draft";
 
 const openaiMocks = vi.hoisted(() => ({
   clientOptions: vi.fn(),
@@ -178,9 +181,22 @@ describe("createHandoffDraft", () => {
     useLiveOpenAI(JSON.stringify(VALID_DRAFT));
     openaiMocks.transcriptionCreate.mockRejectedValue(new Error("vendor detail"));
 
-    await expect(createHandoffDraft(audioFile())).rejects.toThrow(
-      "OPENAI_TRANSCRIPTION_FAILED",
+    const result = await createHandoffDraft(audioFile()).then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (error: unknown) => ({ error, status: "rejected" as const }),
     );
+
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") throw new Error("expected rejection");
+    expect(result.error).toBeInstanceOf(OpenAIDraftError);
+    const error = result.error as OpenAIDraftError;
+    expect({ code: error.code, message: error.message, name: error.name }).toEqual({
+      code: "OPENAI_TRANSCRIPTION_FAILED",
+      message: "OPENAI_TRANSCRIPTION_FAILED",
+      name: "OpenAIDraftError",
+    });
+    expect(`${error.message}\n${error.stack ?? ""}`).not.toContain("vendor detail");
+    expect(openaiMocks.transcriptionCreate).toHaveBeenCalledOnce();
     expect(openaiMocks.completionCreate).not.toHaveBeenCalled();
   });
 

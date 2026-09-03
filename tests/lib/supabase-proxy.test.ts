@@ -420,9 +420,17 @@ describe("Supabase session Proxy", () => {
 
     const response = await updateSession(request);
 
-    expect(response.headers.get("x-middleware-request-cookie")).toContain(
-      "sb-synthetic-auth-token=",
+    const forwardedCookieHeader = response.headers.get(
+      "x-middleware-request-cookie",
     );
+    expect(forwardedCookieHeader).not.toBeNull();
+    const forwardedRequest = new NextRequest("https://homerelay.test/login", {
+      headers: { cookie: forwardedCookieHeader! },
+    });
+    expect(
+      forwardedRequest.cookies.get("sb-synthetic-auth-token")?.value,
+    ).toBe("");
+    expect(forwardedCookieHeader).not.toContain("late");
     expect(response.cookies.get("sb-synthetic-auth-token")).toBeUndefined();
     expect(mocks.createServerClient).not.toHaveBeenCalled();
   });

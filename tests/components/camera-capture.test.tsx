@@ -198,6 +198,7 @@ describe("CameraCapture", () => {
 
     await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole("button", { name: /^撮影/ })).toBeEnabled();
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
   });
 
   it("stops every active track when cancelled and when unmounted", async () => {

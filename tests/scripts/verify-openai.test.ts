@@ -60,6 +60,28 @@ function response(result: unknown = SYNTHETIC_RESULT) {
 }
 
 describe("OpenAI live verifier", () => {
+  it("rejects missing live opt-in before reading a fixture or fetching", async () => {
+    const files = fileDependencies();
+    const fetchImpl = vi.fn();
+    const environmentWithoutOptIn = environment();
+    Reflect.deleteProperty(
+      environmentWithoutOptIn,
+      "HOMERELAY_OPENAI_VERIFY",
+    );
+
+    await expect(
+      verifier.verifyOpenAI({
+        ...files,
+        environment: environmentWithoutOptIn,
+        fetchImpl,
+      }),
+    ).rejects.toThrow("LIVE_VERIFY_NOT_ENABLED");
+
+    expect(files.lstatImpl).not.toHaveBeenCalled();
+    expect(files.readFileImpl).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("rejects a non-loopback destination before reading a fixture or fetching", async () => {
     const files = fileDependencies();
     const fetchImpl = vi.fn();

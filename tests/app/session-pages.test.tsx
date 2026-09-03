@@ -64,17 +64,23 @@ describe("private session pages", () => {
     },
   );
 
-  it("renders the safe error instead of redirecting for an invalid fingerprint", async () => {
+  it("renders no private identity in the DOM when fingerprinting fails", async () => {
+    const privateIdentity = {
+      displayName: "Synthetic Private Family",
+      householdId: "synthetic-private-household",
+      memberId: "synthetic-private-member",
+      userId: "synthetic-private-user",
+    };
     mocks.resolveCurrentSession.mockResolvedValue({
       session: {
         member: {
-          displayName: "Synthetic Family",
-          householdId: "synthetic-household",
-          id: "synthetic-member",
+          displayName: privateIdentity.displayName,
+          householdId: privateIdentity.householdId,
+          id: privateIdentity.memberId,
           role: "family",
         },
         sessionId: "synthetic-session",
-        userId: "synthetic-user",
+        userId: privateIdentity.userId,
       },
       state: "verified",
     });
@@ -88,5 +94,10 @@ describe("private session pages", () => {
       }),
     ).toBeInTheDocument();
     expect(mocks.redirect).not.toHaveBeenCalled();
+    const renderedText = document.body.textContent ?? "";
+    expect(renderedText).not.toContain(privateIdentity.displayName);
+    expect(renderedText).not.toContain(privateIdentity.householdId);
+    expect(renderedText).not.toContain(privateIdentity.memberId);
+    expect(renderedText).not.toContain(privateIdentity.userId);
   });
 });

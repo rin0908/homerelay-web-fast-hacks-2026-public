@@ -219,7 +219,8 @@ describe("RelayHomeFeed optimistic actions", () => {
     const list = vi
       .fn()
       .mockResolvedValueOnce([initial])
-      .mockRejectedValueOnce(new Error("synthetic refresh failure"));
+      .mockRejectedValueOnce(new Error("synthetic refresh failure"))
+      .mockResolvedValue([initial]);
     const relay = {
       acknowledge: vi.fn(),
       claimEntry: vi.fn(() => claimEntry.promise),
