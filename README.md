@@ -259,11 +259,15 @@ Remove-Item Env:HOMERELAY_OPENAI_VERIFY_TOKEN, Env:HOMERELAY_OPENAI_VERIFY_AUDIO
 
 このcheckpointではlint、typecheck、56 files / 434 unit tests、16 synthetic E2E（live-only 2件は意図的skip）、Next.js 16.3.3 production build、privacy audit、production dependency audit、`git diff --check`がPASSしました。privacy auditは190公開候補ファイル、到達可能Git履歴、41 browser配信ファイルを検査し、private media、credential pattern、runtime content log、server-secret markerを検出していません。この時点のPRIVATE Previewでもstandalone起動、固定CTA、即時操作、iPhone＋Windowsの中心導線を物理確認し、60秒と56秒の2回連続成功まで完了しました。
 
-### CodeRabbit実レビュー（2026-09-02〜03）
+### CodeRabbit実レビュー（2026-09-02〜04）
 
 新しいPUBLIC repositoryだけにCodeRabbitを接続し、PR #1の`b9e56a5813b0116d08eb88e992fede66c9c2f336`へ[手動full review](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1#pullrequestreview-5086311772)を実行しました。CodeRabbitは23件のactionable commentを返し、20件はコード／テスト／文書で修正、1件は既存の`afterEach`で保護済み、1件はSupabase専用E2Eのvendor隔離を弱めるため却下、1件は単一serverless runtime内のrate limitという既知の防御層として受容しました。続く`32db7d9…`への[増分review](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1#pullrequestreview-5088079735)ではactionable 4件とoutside-diff 1件を取得し、Node要件、live flag正規化、vendor read-back分類、遅延Auth test、action timeoutの5件をすべて修正しました。
 
 `f996dc6…`ではさらに、遅延`Set-Cookie`と並行ログイン／ログアウトをHttpOnly session guard、server session fingerprint、共有Web Lockでfail closedにし、曖昧なaction応答後の依存batchを止めてSupabase正本のread-backでのみ解除するよう強化しました。同HEADへの[CodeRabbit最終増分review](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1#pullrequestreview-5090633444)は完了し、actionable 9件を取得しました。対応commit `76500b98f1f91ad3bab80c915aa73f90156538b3`で9件を修正し、その25ファイル差分のfollow-up reviewはactionable 0件でした。その後、`209f05a…`へのreviewで、認証確認不能時にdevice loginへ進める1件と、outside-diffの不正な`completedCount`を確定失敗として扱う問題を確認しました。両方をcommit `a4bb941226f095be236023b0e7a5bb5b7e1c2236`でfail closedに修正し、[同commitの8ファイル増分再review](https://github.com/rin0908/homerelay-web-fast-hacks-2026-public/pull/1#issuecomment-5520259638)は`success`、actionable 0件で完了しました。Docstring Coverage 0% / 80%のpre-merge warning 1件は機能・安全性の指摘ではないスタイル指標として受容しています。`a4bb941…`時点ではlint、typecheck、68 files / 590 unit tests、16 synthetic E2E（live-only 2件はcleanup済み外部fixtureを再作成しないため意図的skip）、Next.js 16.3.3 production build、privacy／secret監査、`git diff --check`に合格しています。PRはOPEN・未mergeです。
+
+実行コード`c08c2f5ba4acc6a2b5835f9f9370ac3424d42806`への累計3回目のfull reviewは、actionable 25件（実装・設定9件、テスト16件、outside-diff 0件）でした。Autofixや提案の一括適用は行わず、Batch 1を`d818724ab0ffc2f112813b049e465960b779ac88`、Batch 2を`743ac4288c21d549adb0e3006c292fe86d463a5a`として通常pushし、25件すべてへ個別に技術的根拠または修正commitを返信してresolveしました。続く`743ac428…`への通常incremental reviewは完了・PASSし、新規actionableは0件です。累計4回目のfull reviewは実行していません。
+
+最終検証は、Batch 1 focused 6 files / 76 tests、Batch 2 focused 12 files / 102 tests、lint、typecheck、全unit 71 files / 668 tests、非live E2E 16 passed / live専用2 skipped / 0 failed、production build、privacy／secret audit、`npm audit`脆弱性0件、`git diff --check`がすべてPASSしました。実行コード`743ac428…`が最終incremental reviewと後述の物理試験の対象です。その直後の証拠文書commit `b115931c01e6cc2f43c0078f6b7e9ee97d7105c0`は自動レビュー無効のためskipされただけで、CodeRabbitレビュー済みとは扱いません。`743ac428…`以降の差分は証拠4文書だけです。
 
 ### 2026-09-04 実行コードHEAD `743ac428…`の最終物理再試験とcleanup
 
@@ -305,7 +309,7 @@ loopback検証に必要な`HOMERELAY_TEST_*`と`HOMERELAY_E2E_*`は、[HomeRelay
 - Qdrant: **Qdrant Cloud Freeへ実接続済み・live検証PASS**。`homerelay-qdrant`のHealthy、bootstrap、Cloud Inferenceの類似申し送り／必要品、別世帯filter、検証point削除後0件を確認しました。
 - Neo4j: **AuraDB Freeへ実接続済み・live検証PASS**。`homerelay-graph`のRunning、5 constraints、Home／foreign graphのparameterized write、関係read-back、Home filterでforeign 0件、両世帯cleanup後node／relationship各0件を確認しました。2026 Auraのusername／database形式にも対応済みです。
 - Datadog: verifierとserver-only numeric metricsは実装済みですが、AP1 Japanの認証コード送信／再送信が2つの異なるメールでDatadog側の「不明なエラー」になりました。API key未作成・未保存、live未実行のため**未接続・未使用**です。同じ登録操作は繰り返さず、他工程後に1回だけ再試行します。
-- CodeRabbit: 新しいPUBLIC HomeRelay repositoryだけに接続し、PR #1で実full reviewと増分reviewを完了したため**使用済み**です。初回23件、続くactionable 4件＋outside-diff 1件、さらに9件を分類・対応しました。`209f05a…`への追加reviewで確認した認証1件とoutside-diff action回復1件も`a4bb941…`で修正し、同commitの8ファイル増分reviewはactionable 0件です。Docstring Coverage warning 1件はactionable commentとは別のスタイル指標です。PRはOPEN・未mergeです。
+- CodeRabbit: 新しいPUBLIC HomeRelay repositoryだけに接続し、PR #1で実full reviewと増分reviewを完了したため**使用済み**です。`a4bb941…`までの過去review記録に加え、`c08c2f5…`への累計3回目full reviewのactionable 25件（実装・設定9、テスト16、outside-diff 0）をBatch 1 `d818724…`とBatch 2 `743ac428…`で対応し、全件へ個別返信してresolveしました。`743ac428…`への通常incremental reviewはPASS・新規actionable 0件です。4回目のfull reviewは未実行で、docs-only `b115931…`は自動レビュー無効によるskipのためレビュー済みとは扱いません。PRはOPEN・未mergeです。
 - HackerSquad: builder loginは成功しましたが、対象イベントがArchivedで提出ボタン／project導線がなく、project作成・提出は未実行です。提出済み・使用済みとは扱いません。
 
 詳細な目的、実装ファイル、検証、デモ箇所、必要資格情報は[SPONSOR_TOOL_EVIDENCE.md](SPONSOR_TOOL_EVIDENCE.md)にあります。
