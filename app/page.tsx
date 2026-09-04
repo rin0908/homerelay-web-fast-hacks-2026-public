@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthSessionBoundary } from "@/components/AuthSessionBoundary";
+import { LogoutButton } from "@/app/logout/LogoutButton";
 import { DemoModeBanner } from "@/components/DemoModeBanner";
 import { ArrowRight, Camera, HeartHandshake } from "@/components/Icons";
+import { IphoneInstallHint } from "@/components/IphoneInstallHint";
+import { IndeterminateSessionRecovery } from "@/components/IndeterminateSessionRecovery";
 import { RelayHomeFeed } from "@/components/RelayHomeFeed";
 import { RoleBadge } from "@/components/RoleBadge";
 import { getIntegrationStatus } from "@/lib/integration-status";
 import { DEMO_FAMILY_CONTEXT } from "@/lib/relay/contexts";
 import type { HandoffRelayContext, RelayMode } from "@/lib/relay/types";
-import { getCurrentSession } from "@/lib/supabase/session";
+import { resolveCurrentSession } from "@/lib/supabase/session";
+import { fingerprintSessionId } from "@/lib/supabase/session-guard";
 import { SYNTHETIC_ENTRIES } from "@/lib/synthetic-data";
 
 export default async function HomePage() {
@@ -30,10 +34,28 @@ export default async function HomePage() {
   }
 
   let context: HandoffRelayContext = DEMO_FAMILY_CONTEXT;
+  let expectedAuthUserId: string | null = null;
+  let expectedSessionFingerprint: string | null = null;
   let mode: RelayMode = "demo";
   if (status.dataMode === "supabase") {
-    const session = await getCurrentSession();
-    if (!session) redirect("/login");
+    const resolution = await resolveCurrentSession();
+    if (
+      resolution.state === "unauthenticated" ||
+      resolution.state === "forbidden"
+    ) {
+      redirect("/login");
+    }
+    if (resolution.state === "indeterminate") {
+      return <SessionUnavailable />;
+    }
+    const { session } = resolution;
+    let fingerprint: string | null = null;
+    try {
+      fingerprint = await fingerprintSessionId(session.sessionId);
+    } catch {
+      fingerprint = null;
+    }
+    if (!fingerprint) return <SessionUnavailable />;
     context = {
       householdId: session.member.householdId,
       member: {
@@ -42,13 +64,20 @@ export default async function HomePage() {
         role: session.member.role,
       },
     };
+    expectedAuthUserId = session.userId;
+    expectedSessionFingerprint = fingerprint;
     mode = "supabase";
   }
 
   return (
-    <AuthSessionBoundary mode={mode}>
-    <main className="mx-auto min-h-screen w-full max-w-7xl px-5 py-5 sm:px-8 sm:py-7 lg:px-10">
+    <AuthSessionBoundary
+      expectedAuthUserId={expectedAuthUserId}
+      expectedSessionFingerprint={expectedSessionFingerprint}
+      mode={mode}
+    >
+    <main className="mx-auto min-h-screen w-full max-w-7xl px-5 pb-[calc(env(safe-area-inset-bottom)+6.5rem)] pt-5 sm:px-8 sm:pt-7 lg:px-10 lg:pb-7">
       {mode === "demo" ? <DemoModeBanner /> : null}
+      <IphoneInstallHint />
 
       <header className="mt-5 flex flex-wrap items-center justify-between gap-4 border-b border-[var(--color-divider)] pb-5">
         <Link className="flex items-center gap-3 rounded-xl" href="/" aria-label="HomeRelay 今日の様子">
@@ -65,13 +94,7 @@ export default async function HomePage() {
             {context.member.displayName}
           </span>
           <RoleBadge role={context.member.role} />
-          {mode === "supabase" ? (
-            <form action="/logout" method="post">
-              <button className="secondary-button min-h-10 px-3 py-2 text-sm" type="submit">
-                ログアウト
-              </button>
-            </form>
-          ) : null}
+          {mode === "supabase" ? <LogoutButton /> : null}
         </div>
       </header>
 
@@ -102,7 +125,7 @@ export default async function HomePage() {
           mode={mode}
         />
 
-        <aside className="soft-card p-5 lg:sticky lg:top-6 lg:p-6" aria-labelledby="record-cta-title">
+        <aside className="soft-card hidden p-5 lg:sticky lg:top-6 lg:block lg:p-6" aria-labelledby="record-cta-title">
           <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#edf4f1] text-[var(--color-primary)]">
             <Camera aria-hidden="true" size={25} />
           </span>
@@ -110,9 +133,9 @@ export default async function HomePage() {
             新しく伝える
           </h2>
           <p className="mt-2 text-base text-[var(--color-secondary)]">写真と声だけ。確認してから共有します。</p>
-          <Link className="primary-button mt-6 w-full" href="/record">
+          <Link className="primary-button mt-6 w-full" href="/record?camera=1">
             <Camera aria-hidden="true" size={22} />
-            写真を撮る
+            カメラを開く
             <ArrowRight aria-hidden="true" size={19} />
           </Link>
           <ol className="mt-6 space-y-3 border-t border-[var(--color-divider)] pt-5 text-sm text-[var(--color-body)]">
@@ -138,5 +161,21 @@ export default async function HomePage() {
       </footer>
     </main>
     </AuthSessionBoundary>
+  );
+}
+
+function SessionUnavailable() {
+  return (
+    <main className="mx-auto min-h-screen w-full max-w-xl px-5 py-12" aria-live="polite">
+      <IndeterminateSessionRecovery />
+      <section className="soft-card p-6 text-center" role="alert">
+        <h1 className="text-xl font-semibold text-[var(--color-heading)]">
+          ログインを確認できませんでした
+        </h1>
+        <p className="mt-3 text-[var(--color-secondary)]">
+          通信が戻ると、自動でログインを再確認します。
+        </p>
+      </section>
+    </main>
   );
 }

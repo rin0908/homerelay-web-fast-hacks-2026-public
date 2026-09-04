@@ -6,9 +6,11 @@ vi.mock("server-only", () => ({}));
 const ENV_NAMES = [
   "HOMERELAY_DEMO_MODE",
   "HOMERELAY_DATA_MODE",
+  "HOMERELAY_E2E_ISOLATE_VENDORS",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "OPENAI_API_KEY",
+  "OPENAI_PROJECT_ID",
   "QDRANT_URL",
   "QDRANT_API_KEY",
   "QDRANT_COLLECTION",
@@ -103,6 +105,33 @@ describe("getIntegrationStatus", () => {
     });
   });
 
+  it("normalizes the explicit Supabase data mode for every live integration", () => {
+    for (const name of ENV_NAMES) delete process.env[name];
+    process.env.HOMERELAY_DATA_MODE = " Supabase ";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "synthetic-publishable";
+    process.env.OPENAI_API_KEY = "synthetic-openai";
+    process.env.OPENAI_PROJECT_ID = "proj_synthetic_homerelay";
+    process.env.QDRANT_URL = "https://synthetic.qdrant.test";
+    process.env.QDRANT_API_KEY = "synthetic-qdrant-key";
+    process.env.NEO4J_URI = "neo4j+s://synthetic.databases.neo4j.io";
+    process.env.NEO4J_USERNAME = "neo4j";
+    process.env.NEO4J_PASSWORD = "synthetic-password";
+    process.env.DD_API_KEY = "a".repeat(32);
+    process.env.DD_SITE = "ap1.datadoghq.com";
+
+    expect(getIntegrationStatus()).toMatchObject({
+      appMode: "live",
+      dataMode: "supabase",
+      requestedDataMode: "supabase",
+      openai: { active: true, configured: true },
+      supabase: { active: true, configured: true },
+      qdrant: { active: true, configured: true },
+      neo4j: { active: true, configured: true },
+      datadog: { active: true, configured: true },
+    });
+  });
+
   it("never activates Qdrant outside authenticated Supabase mode", () => {
     for (const name of ENV_NAMES) delete process.env[name];
     process.env.QDRANT_URL = "https://synthetic.qdrant.test";
@@ -124,17 +153,52 @@ describe("getIntegrationStatus", () => {
   });
 
   it("lets the emergency flag force demo even when credentials exist", () => {
-    process.env.HOMERELAY_DEMO_MODE = "true";
+    process.env.HOMERELAY_DEMO_MODE = " TRUE ";
     process.env.HOMERELAY_DATA_MODE = "supabase";
     process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "synthetic-publishable";
     process.env.OPENAI_API_KEY = "synthetic-openai";
+    process.env.OPENAI_PROJECT_ID = "proj_synthetic_homerelay";
 
     expect(getIntegrationStatus()).toMatchObject({
       dataMode: "demo",
       requestedDataMode: "demo",
       openai: { active: false, configured: true },
       supabase: { active: false, configured: true },
+    });
+  });
+
+  it("requires an explicit live flag and project binding before OpenAI can activate", () => {
+    for (const name of ENV_NAMES) delete process.env[name];
+    process.env.OPENAI_API_KEY = "synthetic-openai";
+
+    expect(getIntegrationStatus()).toMatchObject({
+      openai: { active: false, configured: false },
+    });
+
+    process.env.OPENAI_PROJECT_ID = "proj_synthetic_homerelay";
+    expect(getIntegrationStatus()).toMatchObject({
+      openai: { active: false, configured: true },
+    });
+
+    process.env.HOMERELAY_DEMO_MODE = " FALSE ";
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "misconfigured",
+      openai: { active: false, configured: true },
+    });
+
+    process.env.HOMERELAY_DATA_MODE = "supabase";
+    process.env.NEXT_PUBLIC_SUPABASE_URL = "https://synthetic.supabase.test";
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "synthetic-publishable";
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "supabase",
+      openai: { active: true, configured: true },
+    });
+
+    process.env.HOMERELAY_E2E_ISOLATE_VENDORS = " TRUE ";
+    expect(getIntegrationStatus()).toMatchObject({
+      dataMode: "supabase",
+      openai: { active: false, configured: true },
     });
   });
 });

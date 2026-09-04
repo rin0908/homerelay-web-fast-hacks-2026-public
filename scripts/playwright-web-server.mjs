@@ -2,10 +2,15 @@ import http from "node:http";
 import path from "node:path";
 import nextServerModule from "next/dist/server/lib/start-server.js";
 
+import { configurePlaywrightWebServerEnvironment } from "./playwright-web-server-env.mjs";
+
 const { startServer } = nextServerModule;
 const port = Number.parseInt(process.argv[2] ?? "3100", 10);
 const controlPort = port + 100;
 const shutdownPath = "/__homerelay_playwright_shutdown__";
+
+// Playwright validates HomeRelay itself. Vendor connections have dedicated verifiers.
+configurePlaywrightWebServerEnvironment();
 
 if (!Number.isInteger(port) || port < 1 || port > 65_435) {
   throw new Error("Playwright web server port is invalid.");

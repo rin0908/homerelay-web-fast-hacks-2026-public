@@ -1,21 +1,40 @@
 import { File as NodeFile } from "node:buffer";
 
 import { FormData as UndiciFormData } from "undici";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { POST } from "@/app/api/draft/route";
-import { createHandoffDraft } from "@/lib/ai/openai-draft";
+import {
+  createHandoffDraft,
+  OpenAIDraftError,
+} from "@/lib/ai/openai-draft";
+import { resetOpenAIRequestGuardForTests } from "@/lib/ai/request-guard";
 
 vi.mock("server-only", () => ({}));
 vi.stubGlobal("File", NodeFile);
 vi.stubGlobal("FormData", UndiciFormData);
 
-const { createHandoffDraftMock } = vi.hoisted(() => ({
+const { createClientMock, createHandoffDraftMock, getCurrentSessionMock } = vi.hoisted(() => ({
+  createClientMock: vi.fn(),
   createHandoffDraftMock: vi.fn(),
+  getCurrentSessionMock: vi.fn(),
 }));
 
 vi.mock("@/lib/ai/openai-draft", () => ({
   createHandoffDraft: createHandoffDraftMock,
+  OpenAIDraftError: class OpenAIDraftError extends Error {
+    constructor(readonly code: string) {
+      super(code);
+    }
+  },
+}));
+
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: createClientMock,
+}));
+
+vi.mock("@/lib/supabase/session", () => ({
+  getCurrentSession: getCurrentSessionMock,
 }));
 
 const VALID_RESULT = {
@@ -27,7 +46,24 @@ const VALID_RESULT = {
     neededItems: ["トイレットペーパー"],
   },
 };
-const MAX_DRAFT_BODY_BYTES = 10 * 1024 * 1024 + 512_000;
+const MAX_DRAFT_BODY_BYTES = 2 * 1024 * 1024 + 512_000;
+
+function enableAuthenticatedLiveSession() {
+  vi.stubEnv("HOMERELAY_DEMO_MODE", "false");
+  vi.stubEnv("HOMERELAY_DATA_MODE", "supabase");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://synthetic.supabase.test");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "synthetic-publishable");
+  vi.stubEnv("OPENAI_API_KEY", "synthetic-openai-secret");
+  vi.stubEnv("OPENAI_PROJECT_ID", "proj_homerelay_test");
+  createClientMock.mockResolvedValue({ synthetic: true });
+  getCurrentSessionMock.mockResolvedValue({
+    member: {
+      householdId: "20000000-0000-4000-8000-000000000001",
+      id: "10000000-0000-4000-8000-000000000001",
+    },
+    userId: "30000000-0000-4000-8000-000000000001",
+  });
+}
 
 function audioFile(contents: BlobPart[], type = "audio/webm") {
   return new File(contents, "handoff.webm", { type });
@@ -36,6 +72,11 @@ function audioFile(contents: BlobPart[], type = "audio/webm") {
 async function requestWithAudio(
   audio: File | null,
   contentLength?: number,
+  options: {
+    durationMs?: string | null;
+    headers?: Record<string, string>;
+    url?: string;
+  } = {},
 ): Promise<Request> {
   const boundary = "homerelay-synthetic-audio-boundary";
   const encoder = new TextEncoder();
@@ -47,6 +88,15 @@ async function requestWithAudio(
       ),
       new Uint8Array(await audio.arrayBuffer()),
       encoder.encode("\r\n"),
+    );
+  }
+  const durationMs =
+    options.durationMs === undefined ? "1000" : options.durationMs;
+  if (durationMs !== null) {
+    chunks.push(
+      encoder.encode(
+        `--${boundary}\r\nContent-Disposition: form-data; name="durationMs"\r\n\r\n${durationMs}\r\n`,
+      ),
     );
   }
   chunks.push(encoder.encode(`--${boundary}--\r\n`));
@@ -63,8 +113,11 @@ async function requestWithAudio(
   if (contentLength !== undefined) {
     headers.set("content-length", String(contentLength));
   }
+  for (const [name, value] of Object.entries(options.headers ?? {})) {
+    headers.set(name, value);
+  }
 
-  return new Request("http://localhost/api/draft", {
+  return new Request(options.url ?? "http://localhost/api/draft", {
     body,
     headers,
     method: "POST",
@@ -101,8 +154,16 @@ function streamingRequest(chunks: readonly Uint8Array[]) {
 
 describe("POST /api/draft", () => {
   beforeEach(() => {
+    vi.stubEnv("HOMERELAY_DEMO_MODE", "true");
+    resetOpenAIRequestGuardForTests();
+    createClientMock.mockReset();
     createHandoffDraftMock.mockReset();
     createHandoffDraftMock.mockResolvedValue(VALID_RESULT);
+    getCurrentSessionMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("accepts a valid audio request and returns a no-store draft", async () => {
@@ -141,6 +202,20 @@ describe("POST /api/draft", () => {
     await expect(response.json()).resolves.toEqual({
       error: "この音声形式には対応していません",
     });
+    expect(createHandoffDraftMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", null, 400, "録音時間を確認できません"],
+    ["zero", "0", 400, "録音時間を確認できません"],
+    ["too long", "30001", 413, "音声が長すぎます"],
+  ])("rejects %s declared audio duration", async (_label, durationMs, status, error) => {
+    const response = await POST(
+      await requestWithAudio(audioFile(["voice"]), undefined, { durationMs }),
+    );
+
+    expect(response.status).toBe(status);
+    await expect(response.json()).resolves.toEqual({ error });
     expect(createHandoffDraftMock).not.toHaveBeenCalled();
   });
 
@@ -184,9 +259,9 @@ describe("POST /api/draft", () => {
     expect(createHandoffDraftMock).not.toHaveBeenCalled();
   });
 
-  it("rejects an audio file over 10 MiB", async () => {
+  it("rejects an audio file over 2 MiB", async () => {
     const oversizedAudio = audioFile(
-      [new Uint8Array(10 * 1024 * 1024 + 1)],
+      [new Uint8Array(2 * 1024 * 1024 + 1)],
       "audio/webm",
     );
 
@@ -209,5 +284,153 @@ describe("POST /api/draft", () => {
     await expect(response.json()).resolves.toEqual({
       error: "AIの下書きを作れませんでした",
     });
+  });
+
+  it("exposes only a fixed error class during an explicit local live verification", async () => {
+    const verificationToken = "synthetic-route-verifier-token-00000001";
+    vi.stubEnv("HOMERELAY_OPENAI_VERIFY", "true");
+    vi.stubEnv("HOMERELAY_OPENAI_VERIFY_TOKEN", verificationToken);
+    createHandoffDraftMock.mockRejectedValueOnce(
+      new OpenAIDraftError("OPENAI_DRAFT_EMPTY"),
+    );
+
+    const response = await POST(
+      await requestWithAudio(audioFile(["voice"]), undefined, {
+        headers: { "X-HomeRelay-OpenAI-Verify": verificationToken },
+      }),
+    );
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get("x-homerelay-ai-error-class")).toBe(
+      "OPENAI_DRAFT_EMPTY",
+    );
+    await expect(response.json()).resolves.toEqual({
+      error: "AIの下書きを作れませんでした",
+    });
+    expect(createHandoffDraftMock).toHaveBeenCalledWith(expect.any(File), {
+      forceLive: true,
+    });
+  });
+
+  it("does not expose verification details without the loopback verifier header", async () => {
+    const verificationToken = "synthetic-route-verifier-token-00000001";
+    vi.stubEnv("HOMERELAY_OPENAI_VERIFY", "true");
+    vi.stubEnv("HOMERELAY_OPENAI_VERIFY_TOKEN", verificationToken);
+    createHandoffDraftMock.mockRejectedValueOnce(
+      new OpenAIDraftError("OPENAI_DRAFT_EMPTY"),
+    );
+
+    const response = await POST(
+      await requestWithAudio(audioFile(["voice"]), undefined, {
+        headers: { "X-HomeRelay-OpenAI-Verify": verificationToken },
+        url: "https://outside.example.test/api/draft",
+      }),
+    );
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get("x-homerelay-ai-error-class")).toBeNull();
+    expect(createHandoffDraftMock).toHaveBeenCalledWith(expect.any(File), {
+      forceLive: false,
+    });
+  });
+
+  it("refuses a mismatched verifier token even on loopback", async () => {
+    vi.stubEnv("HOMERELAY_OPENAI_VERIFY", "true");
+    vi.stubEnv(
+      "HOMERELAY_OPENAI_VERIFY_TOKEN",
+      "synthetic-route-verifier-token-00000001",
+    );
+    createHandoffDraftMock.mockRejectedValueOnce(
+      new OpenAIDraftError("OPENAI_DRAFT_EMPTY"),
+    );
+
+    const response = await POST(
+      await requestWithAudio(audioFile(["voice"]), undefined, {
+        headers: {
+          "X-HomeRelay-OpenAI-Verify":
+            "synthetic-route-verifier-token-00000002",
+        },
+      }),
+    );
+
+    expect(response.headers.get("x-homerelay-ai-error-class")).toBeNull();
+    expect(createHandoffDraftMock).toHaveBeenCalledWith(expect.any(File), {
+      forceLive: false,
+    });
+  });
+
+  it.each(["flag-off", "production"])(
+    "never enables the verifier bypass in %s mode",
+    async (mode) => {
+      const verificationToken = "synthetic-route-verifier-token-00000001";
+      vi.stubEnv(
+        "HOMERELAY_OPENAI_VERIFY",
+        mode === "flag-off" ? "false" : "true",
+      );
+      vi.stubEnv("HOMERELAY_OPENAI_VERIFY_TOKEN", verificationToken);
+      if (mode === "production") vi.stubEnv("NODE_ENV", "production");
+      createHandoffDraftMock.mockRejectedValueOnce(
+        new OpenAIDraftError("OPENAI_DRAFT_EMPTY"),
+      );
+
+      const response = await POST(
+        await requestWithAudio(audioFile(["voice"]), undefined, {
+          headers: { "X-HomeRelay-OpenAI-Verify": verificationToken },
+        }),
+      );
+
+      expect(response.headers.get("x-homerelay-ai-error-class")).toBeNull();
+      expect(createHandoffDraftMock).toHaveBeenCalledWith(expect.any(File), {
+        forceLive: false,
+      });
+    },
+  );
+
+  it("requires an authenticated Supabase session before a paid live call", async () => {
+    vi.stubEnv("HOMERELAY_DEMO_MODE", "false");
+    vi.stubEnv("HOMERELAY_DATA_MODE", "supabase");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://synthetic.supabase.test");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "synthetic-publishable");
+    vi.stubEnv("OPENAI_API_KEY", "synthetic-openai-secret");
+    vi.stubEnv("OPENAI_PROJECT_ID", "proj_homerelay_test");
+    createClientMock.mockResolvedValue({ synthetic: true });
+    getCurrentSessionMock.mockResolvedValue(null);
+
+    const response = await POST(await requestWithAudio(audioFile(["voice"])));
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(createHandoffDraftMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a no-store live draft for an authenticated Supabase member", async () => {
+    enableAuthenticatedLiveSession();
+    const liveResult = { ...VALID_RESULT, mode: "live" as const };
+    createHandoffDraftMock.mockResolvedValueOnce(liveResult);
+
+    const response = await POST(await requestWithAudio(audioFile(["voice"])));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual(liveResult);
+    expect(createHandoffDraftMock).toHaveBeenCalledWith(expect.any(File), {
+      forceLive: false,
+    });
+  });
+
+  it("rate limits a fourth paid attempt by the same member", async () => {
+    enableAuthenticatedLiveSession();
+    createHandoffDraftMock.mockResolvedValue({ ...VALID_RESULT, mode: "live" });
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const response = await POST(await requestWithAudio(audioFile([`voice-${attempt}`])));
+      expect(response.status).toBe(200);
+    }
+    const limited = await POST(await requestWithAudio(audioFile(["voice-4"])));
+
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("cache-control")).toBe("no-store");
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(createHandoffDraftMock).toHaveBeenCalledTimes(3);
   });
 });

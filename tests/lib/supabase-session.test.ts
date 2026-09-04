@@ -10,17 +10,23 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: mocks.createClient,
 }));
 
-import { getCurrentSession } from "@/lib/supabase/session";
+import {
+  getCurrentSession,
+  resolveCurrentSession,
+} from "@/lib/supabase/session";
 
 type ClientSetup = {
-  claims?: { sub?: string } | null;
-  claimsError?: Error | null;
-  databaseError?: Error | null;
+  claims?: { session_id?: string; sub?: string } | null;
+  claimsError?: unknown;
+  databaseError?: unknown;
   member?: Record<string, unknown> | null;
 };
 
 function clientSetup({
-  claims = { sub: "synthetic-auth-user" },
+  claims = {
+    session_id: "11111111-1111-4111-8111-111111111111",
+    sub: "synthetic-auth-user",
+  },
   claimsError = null,
   databaseError = null,
   member = {
@@ -72,6 +78,7 @@ describe("HomeRelay Supabase session", () => {
         id: "synthetic-member",
         role: "family",
       },
+      sessionId: "11111111-1111-4111-8111-111111111111",
       userId: "synthetic-auth-user",
     });
     expect(setup.getClaims).toHaveBeenCalledOnce();
@@ -87,8 +94,84 @@ describe("HomeRelay Supabase session", () => {
     expect(setup.maybeSingle).toHaveBeenCalledOnce();
   });
 
+  it("exposes a verified resolution while preserving getCurrentSession compatibility", async () => {
+    const setup = clientSetup();
+
+    await expect(resolveCurrentSession(setup.client)).resolves.toMatchObject({
+      session: { userId: "synthetic-auth-user" },
+      state: "verified",
+    });
+  });
+
+  it("distinguishes a clear missing session from an unavailable auth read", async () => {
+    const missing = clientSetup({ claims: null });
+    await expect(resolveCurrentSession(missing.client)).resolves.toEqual({
+      state: "unauthenticated",
+    });
+
+    const expired = clientSetup({
+      claims: null,
+      claimsError: {
+        code: "session_not_found",
+        name: "AuthSessionMissingError",
+        status: 400,
+      },
+    });
+    await expect(resolveCurrentSession(expired.client)).resolves.toEqual({
+      state: "unauthenticated",
+    });
+
+    for (const claimsError of [
+      new Error("synthetic unknown SDK failure"),
+      { status: 401 },
+      { status: 403 },
+      { code: "over_request_rate_limit", status: 429 },
+      { code: "unexpected_failure", status: 503 },
+    ]) {
+      const unavailable = clientSetup({ claims: null, claimsError });
+      await expect(resolveCurrentSession(unavailable.client)).resolves.toEqual({
+        state: "indeterminate",
+      });
+    }
+  });
+
+  it("distinguishes confirmed membership absence from database uncertainty", async () => {
+    const absent = clientSetup({ member: null });
+    await expect(resolveCurrentSession(absent.client)).resolves.toEqual({
+      state: "forbidden",
+    });
+
+    const unavailable = clientSetup({
+      databaseError: new Error("synthetic database failure"),
+      member: null,
+    });
+    await expect(resolveCurrentSession(unavailable.client)).resolves.toEqual({
+      state: "indeterminate",
+    });
+
+    const malformed = clientSetup({ member: { id: "malformed" } });
+    await expect(resolveCurrentSession(malformed.client)).resolves.toEqual({
+      state: "indeterminate",
+    });
+  });
+
   it("does not query members when verified claims are absent", async () => {
     const setup = clientSetup({ claims: null });
+
+    await expect(getCurrentSession(setup.client)).resolves.toBeNull();
+    expect(setup.from).not.toHaveBeenCalled();
+    expect(setup.getSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", { sub: "synthetic-auth-user" }],
+    ["too short", { session_id: "short", sub: "synthetic-auth-user" }],
+    [
+      "invalid characters",
+      { session_id: "invalid session id", sub: "synthetic-auth-user" },
+    ],
+  ])("rejects a %s session_id claim before querying members", async (_name, claims) => {
+    const setup = clientSetup({ claims });
 
     await expect(getCurrentSession(setup.client)).resolves.toBeNull();
     expect(setup.from).not.toHaveBeenCalled();

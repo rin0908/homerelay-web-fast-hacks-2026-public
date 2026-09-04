@@ -55,6 +55,7 @@ describe("Supabase server client", () => {
       "sb_publishable_synthetic",
       expect.any(Object),
     );
+    expect(options.global.fetch).toEqual(expect.any(Function));
     expect(options.cookies.getAll()).toEqual([
       { name: "existing", value: "cookie" },
     ]);

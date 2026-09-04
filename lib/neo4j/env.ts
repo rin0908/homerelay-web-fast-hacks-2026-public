@@ -1,6 +1,11 @@
 import "server-only";
 
-export const DEFAULT_NEO4J_DATABASE = "neo4j";
+import {
+  DEFAULT_NEO4J_DATABASE,
+  resolveNeo4jDatabase,
+} from "@/lib/neo4j/database-resolution.mjs";
+
+export { DEFAULT_NEO4J_DATABASE };
 export const DEFAULT_NEO4J_TIMEOUT_MS = 4_000;
 
 const MIN_TIMEOUT_MS = 250;
@@ -9,6 +14,7 @@ const MAX_TIMEOUT_MS = 15_000;
 export type Neo4jEnvironment = {
   HOMERELAY_DATA_MODE?: string;
   HOMERELAY_DEMO_MODE?: string;
+  HOMERELAY_E2E_ISOLATE_VENDORS?: string;
   NEO4J_DATABASE?: string;
   NEO4J_PASSWORD?: string;
   NEO4J_TIMEOUT_MS?: string;
@@ -28,6 +34,8 @@ function currentEnvironment(): Neo4jEnvironment {
   return {
     HOMERELAY_DATA_MODE: process.env.HOMERELAY_DATA_MODE,
     HOMERELAY_DEMO_MODE: process.env.HOMERELAY_DEMO_MODE,
+    HOMERELAY_E2E_ISOLATE_VENDORS:
+      process.env.HOMERELAY_E2E_ISOLATE_VENDORS,
     NEO4J_DATABASE: process.env.NEO4J_DATABASE,
     NEO4J_PASSWORD: process.env.NEO4J_PASSWORD,
     NEO4J_TIMEOUT_MS: process.env.NEO4J_TIMEOUT_MS,
@@ -39,8 +47,12 @@ function currentEnvironment(): Neo4jEnvironment {
 function isExplicitLiveMode(environment: Neo4jEnvironment): boolean {
   const forcedDemo =
     environment.HOMERELAY_DEMO_MODE?.trim().toLowerCase() === "true";
+  const isolated =
+    environment.HOMERELAY_E2E_ISOLATE_VENDORS?.trim().toLowerCase() ===
+    "true";
   return (
     !forcedDemo &&
+    !isolated &&
     environment.HOMERELAY_DATA_MODE?.trim().toLowerCase() === "supabase"
   );
 }
@@ -109,12 +121,16 @@ export function getNeo4jConfig(
 ): Neo4jConfig | null {
   if (!isExplicitLiveMode(environment)) return null;
 
-  const database =
-    environment.NEO4J_DATABASE?.trim() || DEFAULT_NEO4J_DATABASE;
   const password = environment.NEO4J_PASSWORD ?? "";
   const username = environment.NEO4J_USERNAME?.trim() ?? "";
+  const uriValue = environment.NEO4J_URI?.trim() ?? "";
+  const database = resolveNeo4jDatabase({
+    explicitDatabase: environment.NEO4J_DATABASE,
+    uri: uriValue,
+    username,
+  });
   const timeoutMs = parseTimeout(environment.NEO4J_TIMEOUT_MS);
-  const endpoint = queryApiUrl(environment.NEO4J_URI?.trim() ?? "", database);
+  const endpoint = queryApiUrl(uriValue, database);
 
   if (
     !validDatabase(database) ||

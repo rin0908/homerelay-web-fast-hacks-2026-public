@@ -3,8 +3,17 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  applicationName: "HomeRelay",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "HomeRelay",
+  },
   title: "HomeRelay",
   description: "写真と声で、次の人へ温かくバトンを渡す申し送りWebアプリ",
+  formatDetection: {
+    telephone: false,
+  },
 };
 
 export const viewport: Viewport = {

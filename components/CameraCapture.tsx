@@ -13,6 +13,7 @@ import {
 type CameraState = "idle" | "requesting" | "live" | "captured" | "unsupported" | "error";
 
 export type CameraCaptureProps = {
+  autoStart?: boolean;
   onAccepted: (photo: ProcessedImage) => void | Promise<void>;
 };
 
@@ -63,7 +64,7 @@ async function openCameraStream(constraints: MediaStreamConstraints) {
   throw lastError;
 }
 
-export function CameraCapture({ onAccepted }: CameraCaptureProps) {
+export function CameraCapture({ autoStart = false, onAccepted }: CameraCaptureProps) {
   const [state, setState] = useState<CameraState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [photo, setPhoto] = useState<ProcessedImage | null>(null);
@@ -72,6 +73,7 @@ export function CameraCapture({ onAccepted }: CameraCaptureProps) {
   const streamRef = useRef<MediaStream | null>(null);
   const mountedRef = useRef(true);
   const requestTokenRef = useRef(0);
+  const autoStartedRef = useRef(false);
 
   const clearPhoto = useCallback(() => {
     setPhoto(null);
@@ -144,6 +146,16 @@ export function CameraCapture({ onAccepted }: CameraCaptureProps) {
     }
   }, [clearPhoto, stopCamera]);
 
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    const timer = window.setTimeout(() => void beginCamera(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      autoStartedRef.current = false;
+    };
+  }, [autoStart, beginCamera]);
+
   const capture = useCallback(async () => {
     if (!videoRef.current) return;
 
@@ -193,16 +205,15 @@ export function CameraCapture({ onAccepted }: CameraCaptureProps) {
   return (
     <section className="soft-card overflow-hidden p-5 sm:p-8" aria-labelledby="capture-title">
       <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-2xl border border-[#cfd8d4] bg-[#f2f4ef] text-center">
-        {isVideoVisible ? (
-          <video
-            aria-label="カメラのプレビュー"
-            autoPlay
-            className="h-full w-full object-cover"
-            muted
-            playsInline
-            ref={videoRef}
-          />
-        ) : null}
+        <video
+          aria-label="カメラのプレビュー"
+          autoPlay
+          className="h-full w-full object-cover"
+          hidden={!isVideoVisible}
+          muted
+          playsInline
+          ref={videoRef}
+        />
 
         {state === "captured" && previewUrl ? (
           <img alt="撮影した写真の確認" className="h-full w-full object-cover" src={previewUrl} />
