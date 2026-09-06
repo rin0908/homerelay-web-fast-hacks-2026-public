@@ -48,7 +48,7 @@ export function NeededItemCard({
           onClick={() => onClaim?.(item.id)}
           type="button"
         >
-          購入します
+          買います
         </button>
       ) : (
         <button
@@ -58,7 +58,7 @@ export function NeededItemCard({
           type="button"
         >
           {isPurchased ? <Check aria-hidden="true" size={19} /> : null}
-          購入しました
+          買いました
         </button>
       )}
     </article>

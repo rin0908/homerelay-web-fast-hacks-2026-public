@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { LoginForm } from "@/app/login/LoginForm";
 import { login } from "@/app/login/actions";
 import { DemoModeBanner } from "@/components/DemoModeBanner";
 import { HeartHandshake, ShieldCheck } from "@/components/Icons";
@@ -70,34 +71,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         ) : null}
 
         {configured ? (
-          <form action={login} className="mt-6 space-y-5">
-            <label className="block text-sm font-semibold text-[var(--color-heading)]">
-              メールアドレス
-              <input
-                autoComplete="email"
-                className="mt-2 min-h-14 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 text-[var(--color-body)]"
-                inputMode="email"
-                maxLength={254}
-                name="email"
-                required
-                type="email"
-              />
-            </label>
-            <label className="block text-sm font-semibold text-[var(--color-heading)]">
-              パスワード
-              <input
-                autoComplete="current-password"
-                className="mt-2 min-h-14 w-full rounded-xl border border-[var(--color-divider)] bg-white px-4 text-[var(--color-body)]"
-                maxLength={512}
-                name="password"
-                required
-                type="password"
-              />
-            </label>
-            <button className="primary-button w-full" type="submit">
-              ログイン
-            </button>
-          </form>
+          <LoginForm action={login} />
         ) : (
           <div className="mt-6">
             <p className="text-sm text-[var(--color-secondary)]">

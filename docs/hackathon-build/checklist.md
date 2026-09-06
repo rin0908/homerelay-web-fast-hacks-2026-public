@@ -23,19 +23,19 @@
   Acceptance: No pure black, no heavy typography, primary controls are large and labeled, forbidden item wording is absent.
   Verify: Lint/typecheck plus visual check at approximately 390px and 1280px widths.
 
-- [ ] **3. Implement in-page camera capture — Partial**
-  Current status: Implementation and automated browser coverage pass; the required HTTPS smartphone permission/camera check is still pending.
+- [x] **3. Implement in-page camera capture — Complete and physically verified**
+  Current status: HTTPS PRIVATE Previewの実iPhone Home Screen版で、履歴をスクロールせず使える固定`新しく伝える`CTAから1回の操作で背面カメラを開き、撮影、preview、撮り直し／採用、track cleanup、音声以降を含む中心導線まで物理確認しました。standalone PWA metadata、iOS安全領域、Strict Mode、permission error、phone/desktop E2Eも通過しています。初回のカメラ／マイク許可は利用者ごとのOS安全確認として維持します。
   Spec ref: `spec.md > Camera And Audio`; `prd.md > Epic 1`
   What to build: Rear-camera preview, capture, retake, accept, cleanup, image re-encoding/compression, and fallback only when needed.
   Acceptance: On HTTPS phone, user can capture without selecting a saved photo; tracks stop and temporary images are discarded on retake/cancel.
   Verify: Browser tests for state logic and one manual smartphone camera-permission check.
 
-- [x] **4. Implement voice recording and AI draft — Complete with explicit credential fallback**
-  Current status: The server-only adapter, schema checks, editing, and confirmation boundary pass. Live OpenAI is unconnected; the UI truthfully labels the deterministic synthetic fallback.
+- [x] **4. Implement voice recording and AI draft — Complete and live verified**
+  Current status: The server-only adapter, strict schema checks, editing, and confirmation boundary pass. A 6.97-second synthetic ja-JP WAV completed live transcription with `gpt-4o-mini-transcribe` and strict structured drafting with `gpt-5-mini` in the HomeRelay-only OpenAI Project. Normal paid calls require Supabase live mode plus an invited authenticated session. The UI auto-stops at 30 seconds; the route validates the declared duration and an actual 2 MiB byte ceiling, then applies an in-runtime member/household rate and concurrency guard before the vendor call. It does not claim independent server-side media-duration decoding. The local verifier exception is non-production, loopback-bound, explicit opt-in, and protected by a one-time token. Explicit demo mode retains the labeled deterministic fallback, while a live failure returns a safe 502 and opens an empty manual form without being reported as fallback success.
   Spec ref: `spec.md > AI Contract`; `prd.md > Epic 2`
   What to build: MediaRecorder flow, server-only transcription/structuring route, schema validation, editable confirmation, safe error and synthetic demo fallback.
   Acceptance: Demo phrase produces a concise draft; nothing is shared before confirmation; raw audio/partial transcript is not logged or retained.
-  Verify: Route tests for valid, invalid, and missing-key cases; inspect logs; manually edit a draft.
+  Verify: Component test for one-time 30-second auto-stop, track release, and submission; route tests for valid, invalid, missing-key, authenticated/unauthenticated access, production/flag-off verifier rejection, declared-duration/actual-byte/rate/concurrency bounds, loopback/token isolation, empty-transcript, fixed safe error classes, strict schema, and empty manual fallback; inspect content-free logs; manually edit a draft. 2026-08-30 live evidence: Dashboard 3 requests / 588 input / 419 output tokens, organization balance $18.18→$18.18, Project display spend $0.00→$0.00, $1 hard limit unchanged, pre-confirmation save/share 0, temporary WAV residual 0.
 
 - [x] **5. Add HomeRelay-only Supabase schema and RLS — Complete and cloud verified**
   Current status: Migration `20260827114534_homerelay_core` is applied only to the dedicated HomeRelay project `czfmqaeqamepntpsakbv` in `ap-northeast-1`. General signup is disabled, email confirmation remains required, and the server-only admin invite-link generation/redemption path passes. Five public tables have RLS enabled, `handoff-photos` is private, and three tables are in the Realtime publication. Hosted same-household access and action transitions plus foreign-household SELECT/guarded-RPC/Storage/Realtime denial pass. Security Advisors WARN 6 are accepted as the intended guarded RPC boundary after the function audit below; current Performance INFO 6 are deferred to measured query-plan review for the empty-data MVP.
@@ -44,22 +44,22 @@
   Acceptance: Same-household access works; another household cannot select, insert, update, or access photos.
   Verify: SQL/RLS positive and negative tests; Supabase advisors where available.
 
-- [ ] **6. Save confirmed handoffs and update in realtime — Implementation complete; physical two-device gate pending**
-  Current status: Supabase mode stores only the human-confirmed handoff, private photo and SHA-256-bound idempotency payload, then refreshes a separate authenticated browser context through Postgres Changes. A hosted cloud verifier received an `entries` event for the same household and no event for the foreign household; publication read-back confirms `entries`, `needed_items`, and `acknowledgements`. The browser-local relay remains a separately labeled demo fallback and is never used after a live failure. Hosted HTTPS smartphone-to-PC verification is still pending.
+- [x] **6. Save confirmed handoffs and update in realtime — Complete and physically verified**
+  Current status: Supabase mode stores only the human-confirmed handoff, private photo and SHA-256-bound idempotency payload, then refreshes a separate authenticated browser context through Postgres Changes. A hosted cloud verifier received an `entries` event for the same household and no event for the foreign household; publication read-back confirms `entries`, `needed_items`, and `acknowledgements`. An actual iPhone helper session shared a confirmed handoff to a separate Windows family session over HTTPS Realtime, and the latest card appeared within 10 seconds without reload. The browser-local relay remains a separately labeled demo fallback and is never used after a live failure.
   Spec ref: `prd.md > Epic 3`; `spec.md > Architecture`
   What to build: Confirm/share mutation, idempotency, upload/storage ordering, confirmed-only Realtime subscription, optimistic UI with failure rollback.
   Acceptance: Second device receives a confirmed entry within seconds; drafts never appear; failed share never appears successful.
   Verify: Two-browser and two-device test with timestamps; duplicate-click test.
 
-- [x] **7. Implement action and needed-item states — Complete and locally verified**
-  Current status: `確認しました`, `私が対応します`, `対応しました`, `購入します`, and `購入しました` use session-derived guarded RPCs, durable attribution, ownership checks, idempotent repeats, and Realtime updates. The two-client integration test passes every transition.
+- [x] **7. Implement action and needed-item states — Complete and physically verified**
+  Current status: `見ました`, `私がやります`, `できました`, `買います`, and `買いました` use session-derived guarded RPCs, durable attribution, ownership checks, idempotent repeats, and Realtime updates. Each tap updates the UI optimistically; rapid operations are authenticated once per batch, sent in order, read back from Supabase, rolled back on failure, and flushed with keepalive before page exit. The actual Windows family session completed all five operations and server-side read-back confirmed the final states; the physical response was rated「普通（許容）」. Neo4j receives both purchase-intent and purchased events without becoming an authorization source.
   Spec ref: `prd.md > Epic 3` and `Epic 4`
   What to build: General acknowledgement/claim/done flow and needed-item purchase intent/purchased flow with attribution.
   Acceptance: Exact words are used; transitions persist and update another device; duplicate claims are handled safely.
   Verify: State-transition tests and two-client manual check.
 
-- [ ] **8. Integrate Qdrant meaningfully — Implementation complete; live credential gate pending**
-  Current status: The server-only Cloud Inference adapter, deterministic upsert, household/type/current-entry filters, Supabase RLS candidate revalidation, collection bootstrap, live verifier, non-blocking fallback, and related-candidate UI are implemented. Unit/API/component tests pass. `QDRANT_URL` and `QDRANT_API_KEY` are absent, so bootstrap/live search were not run and this item is not marked complete.
+- [x] **8. Integrate Qdrant meaningfully — Complete and live verified**
+  Current status: The server-only Cloud Inference adapter, deterministic upsert, household/type/current-entry filters, Supabase RLS candidate revalidation, collection bootstrap, live verifier, non-blocking fallback, and related-candidate UI are implemented. The Qdrant Cloud Free cluster `homerelay-qdrant` is Healthy, bootstrap succeeded, and the live verifier passed Cloud Inference for a related handoff and needed item while excluding the foreign household. Every synthetic verification point was deleted and read back as 0; no credential value is recorded here.
   Spec ref: `spec.md > Qdrant`; `prd.md > Submission Proof Points`
   What to build: Server-only embedding/upsert/query adapter, collection bootstrap note/script, household-filtered related entries, duplicate open-item warning, graceful fallback.
   Acceptance: Live credentials produce at least one semantic result; cross-household records never return; Qdrant downtime does not block sharing.
@@ -72,8 +72,12 @@
   Acceptance: Keyboard use is possible, errors are short and actionable, secrets/content are absent from client bundle and logs.
   Verify: Unit/integration tests, accessibility scan, secret scan, production build.
 
-- [ ] **10. Run the winning demo twice and prepare handoff — Local evidence complete; external/manual gates pending**
-  Current status: The synthetic phone/desktop suite passes, and the HomeRelay local-Supabase flow passes twice consecutively between an isolated 390px helper context and a separate desktop family context in one 53.4-second test. The dedicated hosted Supabase project is invite-only and its Auth/membership/Storage/Realtime acceptance suite passes with complete cleanup. A hosted HTTPS deployment, real smartphone plus separate physical PC, live Qdrant, and public GitHub push remain pending.
+- [x] **10. Run the winning demo twice and prepare handoff — Physical two-terminal acceptance complete**
+  Current status: Preview runtime `743ac4288c21d549adb0e3006c292fe86d463a5a` completed the full center flow on an actual iPhone helper and separate Windows family browser. Run 1 was 53 seconds with pre-confirmation non-sharing, 3-second Realtime, and zero Qdrant candidates. Run 2 was an additional successful flow without a recorded time. Run 3 was 57 seconds with pre-confirmation non-sharing, 2-second Realtime, and two Qdrant candidates. The two measured successes are runs 1 and 3, both within 60 seconds. Pre-cleanup read-back found three Auth users, two households, three members, three done entries, three purchased needed items, nine acknowledgements, three Storage objects, six Qdrant points, and a Neo4j projection of 10 nodes/35 relationships; foreign-household records, items, actions, Qdrant candidates, Neo4j nodes, and relationships were all zero. Cleanup targeted only exact IDs and paths in the verified ledger. Three Auth users were deleted only after successful global sign-out. Independent read-backs immediately and two seconds later found Supabase Auth/5 tables/Storage, Qdrant, and Neo4j all zero. Synthetic passwords, fixture ledger, temporary runtime, QR/login materials, and loopback listener were removed; normal credentials and service containers/schema/settings were retained. The first local post-deletion check expression had a PowerShell syntax error; deletion was not retried, and a read-only recheck confirmed cleanup complete. PR #1 remains OPEN/unmerged, Datadog remains unconnected/unused, and HackerSquad remains Archived/unsubmitted.
+  - [x] Current-runtime physical provenance: the 53/57-second measured evidence and the untimed additional success are attributed to Preview runtime `743ac428…`.
+  - [x] Documentation-only provenance: `b115931…` changes only `README.md`, `SPONSOR_TOOL_EVIDENCE.md`, `docs/hackathon-build/checklist.md`, and `docs/hackathon-build/build-notes.md`. CodeRabbit skipped that commit because automatic review was disabled, so it is not described as reviewed; no fourth full review was run. Implementation, tests, configuration, dependencies, and `.coderabbit.yaml` remain unchanged after runtime `743ac428…`.
+  - [x] CodeRabbit closure: the third full review at `c08c2f5…` returned 25 actionable findings (implementation/config 9, tests 16, outside-diff 0). Batch 1 `d818724…` passed 6 files / 76 focused tests; Batch 2 `743ac428…` passed 12 files / 102 focused tests. All 25 received individual replies and were resolved; the normal incremental review of `743ac428…` completed with PASS and 0 new actionable findings.
+  - [x] Final runtime verification: lint and typecheck passed; Vitest passed 71/71 files with 668/668 tests; non-live E2E reported 16 passed, 2 live-only skipped, and 0 failed; production build, privacy/secret audit, production dependency audit with 0 vulnerabilities, and `git diff --check` passed.
   Spec ref: `CODEX_START_HERE.md > Winning demo`
   What to build: Seed deterministic synthetic data, write exact run/deploy instructions, capture verification notes, and list live versus fallback integrations.
   Acceptance: The 60-second flow succeeds twice consecutively on a phone and family screen.

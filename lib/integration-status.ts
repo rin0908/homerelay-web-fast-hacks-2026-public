@@ -31,12 +31,25 @@ function hasEveryEnvironmentVariable(names: string[]): boolean {
 }
 
 export function getIntegrationStatus(): IntegrationStatus {
-  const forcedDemo = process.env.HOMERELAY_DEMO_MODE === "true";
+  const demoMode = process.env.HOMERELAY_DEMO_MODE?.trim().toLowerCase();
+  const vendorIsolation = process.env.HOMERELAY_E2E_ISOLATE_VENDORS
+    ?.trim()
+    .toLowerCase();
+  const configuredDataMode = process.env.HOMERELAY_DATA_MODE
+    ?.trim()
+    .toLowerCase();
+  const forcedDemo = demoMode === "true";
+  const explicitLiveApp = demoMode === "false";
+  const isolateVendors = vendorIsolation === "true";
   const requestedDataMode =
-    !forcedDemo && process.env.HOMERELAY_DATA_MODE === "supabase"
+    !forcedDemo &&
+    (explicitLiveApp || configuredDataMode === "supabase")
       ? "supabase"
       : "demo";
-  const openaiConfigured = hasEveryEnvironmentVariable(["OPENAI_API_KEY"]);
+  const openaiConfigured = hasEveryEnvironmentVariable([
+    "OPENAI_API_KEY",
+    "OPENAI_PROJECT_ID",
+  ]);
   const supabaseConfigured = hasEveryEnvironmentVariable([
     "NEXT_PUBLIC_SUPABASE_URL",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
@@ -76,7 +89,10 @@ export function getIntegrationStatus(): IntegrationStatus {
     ...(dataMode === "misconfigured"
       ? { configurationIssue: "supabase_public_config_missing" as const }
       : {}),
-    openai: service(openaiConfigured, !forcedDemo && openaiConfigured),
+    openai: service(
+      openaiConfigured,
+      dataMode === "supabase" && openaiConfigured && !isolateVendors,
+    ),
     supabase: service(
       supabaseConfigured,
       dataMode === "supabase" && supabaseConfigured,

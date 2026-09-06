@@ -28,7 +28,7 @@ When care changes hands, the next person may not know what happened today, what 
 4. The recorder reviews and confirms it.
 5. The confirmed entry appears on another device within seconds.
 6. The next person acknowledges, claims, or completes an action.
-7. Needed items move from `購入します` to `購入しました`.
+7. Needed items move from `買います` to `買いました`.
 
 ## What We Are Building
 
@@ -59,4 +59,3 @@ Helper phone creates a meal-photo handoff by voice. Family laptop receives it. F
 ## Submission Story
 
 HomeRelay is not surveillance. It is a warm relay baton between the people who provide everyday care.
-

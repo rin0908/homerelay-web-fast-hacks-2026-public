@@ -25,6 +25,7 @@ export type DatadogEnvironment = {
   DATADOG_TIMEOUT_MS?: string;
   HOMERELAY_DATA_MODE?: string;
   HOMERELAY_DEMO_MODE?: string;
+  HOMERELAY_E2E_ISOLATE_VENDORS?: string;
 };
 
 export type DatadogConfig = Readonly<{
@@ -43,6 +44,8 @@ function currentEnvironment(): DatadogEnvironment {
     DATADOG_TIMEOUT_MS: process.env.DATADOG_TIMEOUT_MS,
     HOMERELAY_DATA_MODE: process.env.HOMERELAY_DATA_MODE,
     HOMERELAY_DEMO_MODE: process.env.HOMERELAY_DEMO_MODE,
+    HOMERELAY_E2E_ISOLATE_VENDORS:
+      process.env.HOMERELAY_E2E_ISOLATE_VENDORS,
   };
 }
 
@@ -65,8 +68,11 @@ export function getDatadogConfig(
 ): DatadogConfig | null {
   const forcedDemo =
     environment.HOMERELAY_DEMO_MODE?.trim().toLowerCase() === "true";
+  const isolated =
+    environment.HOMERELAY_E2E_ISOLATE_VENDORS?.trim().toLowerCase() ===
+    "true";
   const dataMode = environment.HOMERELAY_DATA_MODE?.trim().toLowerCase();
-  if (forcedDemo || dataMode !== "supabase") return null;
+  if (forcedDemo || isolated || dataMode !== "supabase") return null;
 
   const canonicalApiKey = environment.DD_API_KEY?.trim() ?? "";
   const legacyApiKey = environment.DATADOG_API_KEY?.trim() ?? "";

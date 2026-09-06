@@ -206,7 +206,7 @@ describe("SupabaseRelay", () => {
     const relay = new SupabaseRelay(
       harness.client,
       { householdId },
-      { fetch: fetchMock },
+      { actionBatchMs: 0, fetch: fetchMock },
     );
     const input = publishInput();
 
@@ -250,11 +250,11 @@ describe("SupabaseRelay", () => {
         JSON.parse(String(init?.body)),
       ]),
     ).toEqual([
-      ["/api/actions", { action: "acknowledge_entry", targetId: entryId }],
-      ["/api/actions", { action: "claim_entry", targetId: entryId }],
-      ["/api/actions", { action: "complete_entry", targetId: entryId }],
-      ["/api/actions", { action: "claim_needed_item", targetId: itemId }],
-      ["/api/actions", { action: "complete_needed_item", targetId: itemId }],
+      ["/api/actions", { actions: [{ action: "acknowledge_entry", targetId: entryId }] }],
+      ["/api/actions", { actions: [{ action: "claim_entry", targetId: entryId }] }],
+      ["/api/actions", { actions: [{ action: "complete_entry", targetId: entryId }] }],
+      ["/api/actions", { actions: [{ action: "claim_needed_item", targetId: itemId }] }],
+      ["/api/actions", { actions: [{ action: "complete_needed_item", targetId: itemId }] }],
     ]);
     for (const [, init] of fetchMock.mock.calls) {
       expect(init).toMatchObject({
@@ -263,6 +263,592 @@ describe("SupabaseRelay", () => {
       });
     }
     expect(harness.rpc).not.toHaveBeenCalled();
+  });
+
+  it("batches guarded transitions after the configured delay", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 650, fetch: fetchMock },
+    );
+
+    const pending = [
+      relay.acknowledge(entryId),
+      relay.claimEntry(entryId),
+      relay.completeEntry(entryId),
+      relay.claimItem(itemId),
+    ];
+    await vi.advanceTimersByTimeAsync(649);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.all(pending);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      actions: [
+        { action: "acknowledge_entry", targetId: entryId },
+        { action: "claim_entry", targetId: entryId },
+        { action: "complete_entry", targetId: entryId },
+        { action: "claim_needed_item", targetId: itemId },
+      ],
+    });
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      keepalive: true,
+      method: "POST",
+    });
+  });
+
+  it("flushes a purchase completion batch immediately", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 650, fetch: fetchMock },
+    );
+
+    const pending = [relay.claimItem(itemId), relay.completeItem(itemId)];
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.all(pending);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      actions: [
+        { action: "claim_needed_item", targetId: itemId },
+        { action: "complete_needed_item", targetId: itemId },
+      ],
+    });
+  });
+
+  it("rejects every queued transition when a batched request fails", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 409 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 650, fetch: fetchMock },
+    );
+
+    const pending = [
+      relay.acknowledge(entryId),
+      relay.claimEntry(entryId),
+      relay.completeEntry(entryId),
+    ];
+    const settled = Promise.allSettled(pending);
+    await vi.advanceTimersByTimeAsync(650);
+
+    const results = await settled;
+    expect(results).toHaveLength(3);
+    expect(results.every((result) => result.status === "rejected")).toBe(true);
+    for (const result of results) {
+      if (result.status === "rejected") {
+        expect(result.reason).toMatchObject({ code: "ACTION_FAILED" });
+      }
+    }
+  });
+
+  it("resolves the successful prefix of a partially completed batch", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        { completedCount: 1, error: "synthetic guarded failure" },
+        { status: 409 },
+      ),
+    );
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 650, fetch: fetchMock },
+    );
+
+    const settled = Promise.allSettled([
+      relay.acknowledge(entryId),
+      relay.claimEntry(entryId),
+      relay.completeEntry(entryId),
+    ]);
+    await vi.advanceTimersByTimeAsync(650);
+
+    const results = await settled;
+    expect(results.map(({ status }) => status)).toEqual([
+      "fulfilled",
+      "rejected",
+      "rejected",
+    ]);
+    for (const result of results.slice(1)) {
+      if (result?.status === "rejected") {
+        expect(result.reason).toMatchObject({ code: "ACTION_FAILED" });
+      }
+    }
+  });
+
+  it("blocks later batches when a non-2xx JSON body omits completedCount", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ error: "synthetic upstream failure" }, { status: 502 }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, fetch: fetchMock },
+    );
+
+    const first = Promise.allSettled([relay.acknowledge(entryId)]);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(first).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+
+    await expect(relay.claimEntry(entryId)).rejects.toMatchObject({
+      code: "ACTION_FAILED",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("allows a later batch after an explicit completedCount of zero", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { completedCount: 0, error: "synthetic guarded failure" },
+          { status: 409 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, fetch: fetchMock },
+    );
+
+    const first = Promise.allSettled([relay.acknowledge(entryId)]);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(first).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+
+    const retry = relay.claimEntry(entryId);
+    await vi.advanceTimersByTimeAsync(0);
+    await retry;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("serializes a second flush behind an in-flight action request", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let releaseFirst!: (response: Response) => void;
+    const firstResponse = new Promise<Response>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => firstResponse)
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 650, fetch: fetchMock },
+    );
+
+    const claim = relay.claimItem(itemId);
+    await vi.advanceTimersByTimeAsync(650);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const complete = relay.completeItem(itemId);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    releaseFirst(new Response(null, { status: 204 }));
+    await claim;
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await complete;
+    expect(
+      fetchMock.mock.calls.map(([, init]) =>
+        JSON.parse(String(init?.body)).actions[0].action,
+      ),
+    ).toEqual(["claim_needed_item", "complete_needed_item"]);
+  });
+
+  it("times out a stalled request and blocks dependent batches until reload", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let stalledSignal: AbortSignal | undefined;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            stalledSignal = init?.signal ?? undefined;
+            stalledSignal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("synthetic abort", "AbortError")),
+              { once: true },
+            );
+          }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, actionTimeoutMs: 100, fetch: fetchMock },
+    );
+
+    const stalled = relay.acknowledge(entryId);
+    const stalledSettlement = Promise.allSettled([stalled]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const queued = relay.claimItem(itemId);
+    const queuedSettlement = Promise.allSettled([queued]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    const [stalledResult] = await stalledSettlement;
+    expect(stalledResult).toMatchObject({
+      reason: { code: "ACTION_FAILED" },
+      status: "rejected",
+    });
+    const [queuedResult] = await queuedSettlement;
+    expect(queuedResult).toMatchObject({
+      reason: { code: "ACTION_FAILED" },
+      status: "rejected",
+    });
+    expect(stalledSignal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await expect(relay.completeItem(itemId)).rejects.toMatchObject({
+      code: "ACTION_FAILED",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the action timeout active while a non-2xx response body stalls", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let stalledSignal: AbortSignal | undefined;
+    const stalledJson = vi.fn(() => new Promise<never>(() => undefined));
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        (_input: RequestInfo | URL, init?: RequestInit) => {
+          stalledSignal = init?.signal ?? undefined;
+          return Promise.resolve({
+            json: stalledJson,
+            ok: false,
+          } as unknown as Response);
+        },
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, actionTimeoutMs: 100, fetch: fetchMock },
+    );
+
+    const stalled = relay.acknowledge(entryId);
+    const stalledSettlement = Promise.allSettled([stalled]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(stalledJson).toHaveBeenCalledOnce();
+
+    const queued = relay.claimItem(itemId);
+    const queuedSettlement = Promise.allSettled([queued]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    const [stalledResult] = await stalledSettlement;
+    expect(stalledResult).toMatchObject({
+      reason: { code: "ACTION_FAILED" },
+      status: "rejected",
+    });
+    const [queuedResult] = await queuedSettlement;
+    expect(queuedResult).toMatchObject({
+      reason: { code: "ACTION_FAILED" },
+      status: "rejected",
+    });
+    expect(stalledSignal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("blocks dependent batches when a non-2xx response body read fails", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let rejectBody!: (error: unknown) => void;
+    const body = new Promise<never>((_resolve, reject) => {
+      rejectBody = reject;
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        json: () => body,
+        ok: false,
+      } as unknown as Response)
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, actionTimeoutMs: 1_000, fetch: fetchMock },
+    );
+
+    const first = relay.acknowledge(entryId);
+    const firstSettlement = Promise.allSettled([first]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const dependent = relay.claimEntry(entryId);
+    const dependentSettlement = Promise.allSettled([dependent]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    rejectBody(new DOMException("synthetic body disconnect", "AbortError"));
+    await expect(firstSettlement).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+    await expect(dependentSettlement).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await expect(relay.completeEntry(entryId)).rejects.toMatchObject({
+      code: "ACTION_FAILED",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("settles every unsent pending action when an in-flight outcome becomes uncertain", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let rejectRequest!: (error: unknown) => void;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((_resolve, reject) => {
+          rejectRequest = reject;
+        }),
+    );
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 60_000, fetch: fetchMock },
+    );
+
+    // Ten actions trigger an immediate maximum-size flush. Actions accepted
+    // while that request is in flight remain in #pendingActions with a long
+    // timer and must not wait for that timer after the outcome is uncertain.
+    const inFlight = Array.from({ length: 10 }, () =>
+      relay.acknowledge(entryId),
+    );
+    const inFlightSettlement = Promise.allSettled(inFlight);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const unsentSettlement = Promise.allSettled([
+      relay.claimEntry(entryId),
+      relay.completeEntry(entryId),
+    ]);
+    rejectRequest(new TypeError("synthetic outcome unknown"));
+
+    const results = [
+      ...(await inFlightSettlement),
+      ...(await unsentSettlement),
+    ];
+    expect(results).toHaveLength(12);
+    for (const result of results) {
+      expect(result).toMatchObject({
+        reason: { code: "ACTION_FAILED" },
+        status: "rejected",
+      });
+    }
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("never revives a pre-failure serialized batch after list recovery", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let rejectFirst!: (error: unknown) => void;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((_resolve, reject) => {
+            rejectFirst = reject;
+          }),
+      )
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, fetch: fetchMock },
+    );
+
+    const first = relay.acknowledge(entryId);
+    const firstSettlement = Promise.allSettled([first]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    // Each batch is removed from #pendingActions and captured separately by
+    // the flush chain while the first request is still in flight. Several
+    // batches leave enough serialized turns for list() to recover the boolean
+    // flag before the last old batch reaches send(). The generation must still
+    // reject every one of them.
+    const stale: Promise<void>[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      stale.push(relay.claimEntry(entryId));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    const staleSettlement = Promise.allSettled(stale);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const recovery = first.catch(() => relay.list());
+
+    rejectFirst(new TypeError("synthetic outcome unknown"));
+    await recovery;
+    await expect(firstSettlement).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+
+    const staleResults = await staleSettlement;
+    expect(staleResults).toHaveLength(6);
+    for (const result of staleResults) {
+      expect(result).toMatchObject({
+        reason: { code: "ACTION_FAILED" },
+        status: "rejected",
+      });
+    }
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const retry = relay.claimEntry(entryId);
+    await vi.advanceTimersByTimeAsync(0);
+    await retry;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not recover actions from a list started before an uncertain outcome", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    let resolveStaleList!: (value: {
+      data: SupabaseListEntryRow[];
+      error: null;
+    }) => void;
+    harness.query.limit
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveStaleList = resolve;
+        }),
+      )
+      .mockResolvedValue({ data: [listRow()], error: null });
+
+    let rejectAction!: (error: unknown) => void;
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((_resolve, reject) => {
+            rejectAction = reject;
+          }),
+      )
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, fetch: fetchMock },
+    );
+
+    const staleList = relay.list();
+    const uncertain = relay.acknowledge(entryId);
+    const uncertainSettlement = Promise.allSettled([uncertain]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    rejectAction(new TypeError("synthetic outcome unknown"));
+    await expect(uncertainSettlement).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+
+    resolveStaleList({ data: [listRow()], error: null });
+    await staleList;
+    await expect(relay.claimEntry(entryId)).rejects.toMatchObject({
+      code: "ACTION_FAILED",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    await relay.list();
+    const retry = relay.claimEntry(entryId);
+    await vi.advanceTimersByTimeAsync(0);
+    await retry;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers guarded actions only after an authoritative list succeeds", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("synthetic disconnect"))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 0, fetch: fetchMock },
+    );
+
+    const uncertain = relay.acknowledge(entryId);
+    const uncertainSettlement = Promise.allSettled([uncertain]);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(uncertainSettlement).resolves.toMatchObject([
+      { reason: { code: "ACTION_FAILED" }, status: "rejected" },
+    ]);
+    await expect(relay.claimEntry(entryId)).rejects.toMatchObject({
+      code: "ACTION_FAILED",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    await relay.list();
+    const retry = relay.claimEntry(entryId);
+    await vi.advanceTimersByTimeAsync(0);
+    await retry;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("flushes a queued keepalive action before the page is hidden", async () => {
+    const harness = createHarness();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const relay = new SupabaseRelay(
+      harness.client,
+      { householdId },
+      { actionBatchMs: 60_000, fetch: fetchMock },
+    );
+    const unsubscribe = relay.subscribe(vi.fn());
+
+    const pending = relay.acknowledge(entryId);
+    window.dispatchEvent(new Event("pagehide"));
+    await pending;
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ keepalive: true });
+    unsubscribe();
   });
 
   it("debounces three household Realtime tables into one fresh list", async () => {

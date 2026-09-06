@@ -3,13 +3,23 @@ import { redirect } from "next/navigation";
 import { AuthSessionBoundary } from "@/components/AuthSessionBoundary";
 import { ArrowLeft, Camera, Check, Mic, Send } from "@/components/Icons";
 import { DemoModeBanner } from "@/components/DemoModeBanner";
+import { IndeterminateSessionRecovery } from "@/components/IndeterminateSessionRecovery";
 import { RecordFlow } from "@/components/RecordFlow";
 import { getIntegrationStatus } from "@/lib/integration-status";
 import { DEMO_HELPER_CONTEXT } from "@/lib/relay/contexts";
 import type { HandoffRelayContext, RelayMode } from "@/lib/relay/types";
-import { getCurrentSession } from "@/lib/supabase/session";
+import { resolveCurrentSession } from "@/lib/supabase/session";
+import { fingerprintSessionId } from "@/lib/supabase/session-guard";
 
-export default async function RecordPage() {
+export default async function RecordPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ camera?: string | string[] }>;
+}) {
+  const requestedCamera = (await searchParams).camera;
+  const autoStartCamera =
+    requestedCamera === "1" ||
+    (Array.isArray(requestedCamera) && requestedCamera.includes("1"));
   const status = getIntegrationStatus();
   if (status.dataMode === "misconfigured") {
     return (
@@ -31,10 +41,28 @@ export default async function RecordPage() {
   }
 
   let context: HandoffRelayContext = DEMO_HELPER_CONTEXT;
+  let expectedAuthUserId: string | null = null;
+  let expectedSessionFingerprint: string | null = null;
   let mode: RelayMode = "demo";
   if (status.dataMode === "supabase") {
-    const session = await getCurrentSession();
-    if (!session) redirect("/login");
+    const resolution = await resolveCurrentSession();
+    if (
+      resolution.state === "unauthenticated" ||
+      resolution.state === "forbidden"
+    ) {
+      redirect("/login");
+    }
+    if (resolution.state === "indeterminate") {
+      return <SessionUnavailable />;
+    }
+    const { session } = resolution;
+    let fingerprint: string | null = null;
+    try {
+      fingerprint = await fingerprintSessionId(session.sessionId);
+    } catch {
+      fingerprint = null;
+    }
+    if (!fingerprint) return <SessionUnavailable />;
     context = {
       householdId: session.member.householdId,
       member: {
@@ -43,11 +71,17 @@ export default async function RecordPage() {
         role: session.member.role,
       },
     };
+    expectedAuthUserId = session.userId;
+    expectedSessionFingerprint = fingerprint;
     mode = "supabase";
   }
 
   return (
-    <AuthSessionBoundary mode={mode}>
+    <AuthSessionBoundary
+      expectedAuthUserId={expectedAuthUserId}
+      expectedSessionFingerprint={expectedSessionFingerprint}
+      mode={mode}
+    >
     <main className="mx-auto min-h-screen w-full max-w-4xl px-5 py-6 sm:px-8 sm:py-8">
       {mode === "demo" ? <DemoModeBanner /> : null}
       <nav className="mt-6" aria-label="戻る">
@@ -92,6 +126,7 @@ export default async function RecordPage() {
 
       <div className="mt-6">
         <RecordFlow
+          autoStartCamera={autoStartCamera}
           context={context}
           key={`${context.householdId}:${context.member.id}`}
           mode={mode}
@@ -99,5 +134,21 @@ export default async function RecordPage() {
       </div>
     </main>
     </AuthSessionBoundary>
+  );
+}
+
+function SessionUnavailable() {
+  return (
+    <main className="mx-auto min-h-screen w-full max-w-xl px-5 py-12" aria-live="polite">
+      <IndeterminateSessionRecovery />
+      <section className="soft-card p-6 text-center" role="alert">
+        <h1 className="text-xl font-semibold text-[var(--color-heading)]">
+          ログインを確認できませんでした
+        </h1>
+        <p className="mt-3 text-[var(--color-secondary)]">
+          通信が戻ると、自動でログインを再確認します。
+        </p>
+      </section>
+    </main>
   );
 }

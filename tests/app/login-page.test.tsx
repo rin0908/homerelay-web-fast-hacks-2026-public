@@ -66,7 +66,10 @@ describe("invited member login page", () => {
 
     render(await page({ error: "membership", loggedOut: "1" }));
 
-    expect(screen.getByRole("status")).toHaveTextContent("ログアウトしました");
+    expect(screen.getByText("ログアウトしました。")).toHaveAttribute(
+      "role",
+      "status",
+    );
     expect(screen.getByRole("alert")).toHaveTextContent(
       "招待された世帯メンバーであることを確認できませんでした",
     );

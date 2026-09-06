@@ -63,7 +63,7 @@ Acceptance:
 
 - A second subscribed device receives the confirmed entry within seconds under normal network conditions.
 - Card shows photo, concise text, timestamp, name, and text role badge.
-- General action labels are exactly `確認しました`, `私が対応します`, `対応しました`.
+- General action labels are exactly `見ました`, `私がやります`, `できました`.
 - The updater is attributable.
 
 ## Epic 4 — Needed Items
@@ -73,8 +73,8 @@ User story: As a family member or helper, I want to claim and complete a purchas
 Acceptance:
 
 - Section title is `必要なもの`.
-- Buttons are exactly `購入します` and `購入しました`.
-- Do not use `買います`, `買いました`, `届けました`, `補充しました`, or `補充済み`.
+- Buttons are exactly `買います` and `買いました`.
+- Do not use `購入します`, `購入しました`, `届けました`, `補充しました`, or `補充済み`.
 - Claiming records the member.
 - Qdrant can return a related unpurchased item or prior handoff.
 
@@ -96,4 +96,3 @@ Acceptance:
 - Two-device realtime update
 - Qdrant semantic result with household filter
 - Warm, minimal Japanese UI
-

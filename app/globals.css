@@ -91,6 +91,7 @@ a {
   border-radius: 1rem;
   padding: 0.8rem 1.25rem;
   font-weight: 600;
+  touch-action: manipulation;
   transition:
     background-color 160ms ease,
     border-color 160ms ease,
@@ -121,7 +122,13 @@ a {
 
 .primary-button:active,
 .secondary-button:active {
-  transform: translateY(1px);
+  transform: translateY(1px) scale(0.985);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 .eyebrow {

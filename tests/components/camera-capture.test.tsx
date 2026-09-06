@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import {
   afterEach,
@@ -170,6 +171,34 @@ describe("CameraCapture", () => {
     for (const track of second.tracks) {
       expect(track.stop).toHaveBeenCalled();
     }
+  });
+
+  it("starts the rear camera once when opened from the home capture action", async () => {
+    const camera = createMockStream();
+    const getUserMedia = vi.fn().mockResolvedValue(camera.stream);
+    installMediaDevices(getUserMedia);
+
+    render(<CameraCapture autoStart onAccepted={vi.fn()} />);
+
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("button", { name: /^撮影/ })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "写真を撮る" })).not.toBeInTheDocument();
+  });
+
+  it("starts the rear camera exactly once under React Strict Mode", async () => {
+    const camera = createMockStream();
+    const getUserMedia = vi.fn().mockResolvedValue(camera.stream);
+    installMediaDevices(getUserMedia);
+
+    render(
+      <StrictMode>
+        <CameraCapture autoStart onAccepted={vi.fn()} />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("button", { name: /^撮影/ })).toBeEnabled();
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
   });
 
   it("stops every active track when cancelled and when unmounted", async () => {

@@ -6,8 +6,9 @@ reviews:
   high_level_summary: true
   poem: false
   review_status: true
+  disable_cache: true
   auto_review:
-    enabled: true
+    enabled: false
     drafts: false
   path_filters:
     - "!public/demo/**"
@@ -41,3 +42,5 @@ reviews:
       enabled: true
 chat:
   auto_reply: true
+knowledge_base:
+  opt_out: true

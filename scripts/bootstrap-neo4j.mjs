@@ -1,11 +1,14 @@
 import { Buffer } from "node:buffer";
 
 import {
+  isNeo4jLiveMode,
+  resolveNeo4jDatabase,
+} from "./neo4j-connection.mjs";
+import {
   applyNeo4jSchema,
   NEO4J_SCHEMA_CONSTRAINTS,
 } from "./neo4j-schema.mjs";
 
-const DEFAULT_DATABASE = "neo4j";
 const DEFAULT_TIMEOUT_MS = 4_000;
 const MAX_RESPONSE_BYTES = 1_000_000;
 const VERIFY_CONSTRAINTS =
@@ -23,23 +26,16 @@ function assert(condition, code) {
   if (!condition) throw new Error(code);
 }
 
-function configuration() {
-  const uriValue = process.env.NEO4J_URI?.trim();
-  const username = process.env.NEO4J_USERNAME?.trim();
-  const password = process.env.NEO4J_PASSWORD;
+function configuration(environment = process.env) {
+  const uriValue = environment.NEO4J_URI?.trim();
+  const username = environment.NEO4J_USERNAME?.trim();
+  const password = environment.NEO4J_PASSWORD;
   if (!uriValue || !username || !password) return null;
-  if (
-    process.env.HOMERELAY_DEMO_MODE?.trim().toLowerCase() === "true" ||
-    process.env.HOMERELAY_DATA_MODE?.trim().toLowerCase() !== "supabase"
-  ) {
-    return null;
-  }
+  if (!isNeo4jLiveMode(environment)) return null;
 
-  const database = process.env.NEO4J_DATABASE?.trim() || DEFAULT_DATABASE;
-  const timeoutText = process.env.NEO4J_TIMEOUT_MS?.trim();
+  const timeoutText = environment.NEO4J_TIMEOUT_MS?.trim();
   const timeoutMs = timeoutText ? Number(timeoutText) : DEFAULT_TIMEOUT_MS;
   if (
-    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/.test(database) ||
     username.includes(":") ||
     /[\u0000-\u001f\u007f]/.test(username) ||
     /[\u0000-\u001f\u007f]/.test(password) ||
@@ -73,6 +69,15 @@ function configuration() {
     ].includes(uri.protocol)
   ) {
     throw new Error("NEO4J_URI_UNSAFE");
+  }
+
+  const database = resolveNeo4jDatabase({
+    explicitDatabase: environment.NEO4J_DATABASE,
+    uri,
+    username,
+  });
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/.test(database)) {
+    throw new Error("NEO4J_CONFIG_INVALID");
   }
 
   const origin =

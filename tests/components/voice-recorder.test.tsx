@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   afterEach,
@@ -111,6 +111,7 @@ describe("VoiceRecorder", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
 
     Object.defineProperty(navigator, "mediaDevices", {
@@ -127,6 +128,40 @@ describe("VoiceRecorder", () => {
     });
   });
 
+  it("automatically stops once at 30 seconds, releases tracks, and submits", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-30T00:00:00.000Z"));
+    const { stream, tracks } = createMockStream();
+    installMediaDevices(vi.fn().mockResolvedValue(stream));
+    fetchMock.mockResolvedValue({
+      json: vi.fn().mockResolvedValue(successfulResult),
+      ok: true,
+    });
+    const onDraft = vi.fn();
+    render(<VoiceRecorder onDraft={onDraft} onManualEntry={vi.fn()} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "声で話す" }));
+      await Promise.resolve();
+    });
+    expect(MockMediaRecorder.instances).toHaveLength(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(MockMediaRecorder.instances[0]?.stop).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const formData = request.body as FormData;
+    expect(formData.get("durationMs")).toBe("30000");
+    for (const track of tracks) {
+      expect(track.stop).toHaveBeenCalledTimes(1);
+    }
+    expect(onDraft).toHaveBeenCalledWith(successfulResult);
+    expectNoConsoleOutput();
+  });
+
   it("records audio only, stops every track, and returns a validated draft", async () => {
     const { stream, tracks } = createMockStream();
     const getUserMedia = vi.fn().mockResolvedValue(stream);
@@ -137,7 +172,7 @@ describe("VoiceRecorder", () => {
     });
     const onDraft = vi.fn();
     const user = userEvent.setup();
-    render(<VoiceRecorder onDraft={onDraft} />);
+    render(<VoiceRecorder onDraft={onDraft} onManualEntry={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: "声で話す" }));
 
@@ -161,8 +196,12 @@ describe("VoiceRecorder", () => {
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(request.body).toBeInstanceOf(FormData);
     const formData = request.body as FormData;
-    expect(Array.from(formData.keys())).toEqual(["audio"]);
+    expect(Array.from(formData.keys())).toEqual(["audio", "durationMs"]);
     expect(formData.get("audio")).toBeInstanceOf(Blob);
+    const durationMs = Number(formData.get("durationMs"));
+    expect(Number.isSafeInteger(durationMs)).toBe(true);
+    expect(durationMs).toBeGreaterThanOrEqual(1);
+    expect(durationMs).toBeLessThanOrEqual(30_000);
 
     await waitFor(() => expect(onDraft).toHaveBeenCalledWith(successfulResult));
     for (const track of tracks) {
@@ -180,7 +219,9 @@ describe("VoiceRecorder", () => {
       .mockResolvedValueOnce(unmounted.stream);
     installMediaDevices(getUserMedia);
     const user = userEvent.setup();
-    const { unmount } = render(<VoiceRecorder onDraft={vi.fn()} />);
+    const { unmount } = render(
+      <VoiceRecorder onDraft={vi.fn()} onManualEntry={vi.fn()} />,
+    );
 
     await user.click(screen.getByRole("button", { name: "声で話す" }));
     await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
@@ -207,7 +248,7 @@ describe("VoiceRecorder", () => {
       .mockRejectedValue(new DOMException("permission denied", "NotAllowedError"));
     installMediaDevices(getUserMedia);
     const user = userEvent.setup();
-    render(<VoiceRecorder onDraft={vi.fn()} />);
+    render(<VoiceRecorder onDraft={vi.fn()} onManualEntry={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: "声で話す" }));
 
@@ -222,16 +263,20 @@ describe("VoiceRecorder", () => {
   it("offers another recording after an AI failure without logging audio or a partial transcript", async () => {
     const { stream, tracks } = createMockStream();
     installMediaDevices(vi.fn().mockResolvedValue(stream));
+    const json = vi.fn().mockResolvedValue({
+      error: "synthetic upstream failure",
+      partialTranscript: partialTranscriptSentinel,
+    });
     fetchMock.mockResolvedValue({
-      json: vi.fn().mockResolvedValue({
-        error: "synthetic upstream failure",
-        partialTranscript: partialTranscriptSentinel,
-      }),
+      json,
       ok: false,
     });
     const onDraft = vi.fn();
+    const onManualEntry = vi.fn();
     const user = userEvent.setup();
-    render(<VoiceRecorder onDraft={onDraft} />);
+    render(
+      <VoiceRecorder onDraft={onDraft} onManualEntry={onManualEntry} />,
+    );
 
     await user.click(screen.getByRole("button", { name: "声で話す" }));
     await user.click(await screen.findByRole("button", { name: "録音を停止" }));
@@ -241,6 +286,9 @@ describe("VoiceRecorder", () => {
     );
     expect(screen.getByRole("button", { name: "もう一度話す" })).toBeInTheDocument();
     expect(onDraft).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "手入力する" }));
+    expect(onManualEntry).toHaveBeenCalledOnce();
+    expect(json).not.toHaveBeenCalled();
     for (const track of tracks) {
       expect(track.stop).toHaveBeenCalledTimes(1);
     }

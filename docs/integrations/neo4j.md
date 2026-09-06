@@ -36,17 +36,23 @@ Set these only in the server environment, never with a `NEXT_PUBLIC_` prefix:
 ```dotenv
 HOMERELAY_DEMO_MODE=false
 HOMERELAY_DATA_MODE=supabase
-NEO4J_URI=neo4j+s://your-home-relay-instance.databases.neo4j.io
-NEO4J_USERNAME=neo4j
+NEO4J_URI=neo4j+s://abcd1234.databases.neo4j.io
+NEO4J_USERNAME=abcd1234
 NEO4J_PASSWORD=
-NEO4J_DATABASE=neo4j
+NEO4J_DATABASE=abcd1234
 NEO4J_TIMEOUT_MS=4000
 ```
 
 `NEO4J_URI` accepts an Aura `neo4j+s://` connection URI and uses the same host's
 TLS Query API. HTTPS is required except for an explicit loopback development
-server. Missing or invalid configuration disables the adapter before any network
-request.
+server. Copy the Username and Database values shown for the AuraDB Free instance;
+current instances can use the same eight-character instance ID for both. An
+explicit `NEO4J_DATABASE` always wins. If it is blank, HomeRelay derives the
+database from the username only when that eight-character username exactly
+matches the Aura hostname `<username>.databases.neo4j.io`; older Aura credentials
+and local servers retain the `neo4j` default. Missing or invalid configuration,
+demo mode, and `HOMERELAY_E2E_ISOLATE_VENDORS=true` disable the adapter before
+any network request.
 
 ## Verification
 
@@ -70,10 +76,12 @@ npm run verify:neo4j
 
 Without credentials both commands exit successfully with `SKIP / 未接続` and
 make no request. With HomeRelay-only credentials the verifier writes a uniquely
-identified synthetic graph, reads back family/relative/helper, handoff
-assignment, and purchase relations, then removes only that run's exact synthetic
-household. Query API requests reject redirects so the Basic authorization header
-cannot be forwarded to another endpoint.
+identified HomeRelay graph and a separate synthetic foreign-household graph. It
+reads back family/relative/helper, handoff assignment, and purchase relations,
+then proves the HomeRelay household filter returns zero foreign relationships.
+It removes only that run's two exact synthetic households and reads back zero
+remaining nodes and relationships for each. Query API requests reject redirects
+so the Basic authorization header cannot be forwarded to another endpoint.
 Passing local unit tests prove parameterization and fallback behavior, but do not
 count as a live Neo4j connection.
 

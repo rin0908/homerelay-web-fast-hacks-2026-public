@@ -5,9 +5,11 @@ import { AlertTriangle, Mic, RotateCcw, Square, X } from "@/components/Icons";
 import { DraftResultSchema, type DraftResult } from "@/lib/ai/draft";
 
 type RecorderState = "idle" | "requesting" | "recording" | "processing" | "error";
+const MAX_RECORDING_MS = 30_000;
 
 export type VoiceRecorderProps = {
   onDraft: (result: DraftResult) => void;
+  onManualEntry: () => void;
 };
 
 function stopTracks(stream: MediaStream | null) {
@@ -26,7 +28,7 @@ function microphoneErrorMessage(error: unknown) {
   return "音声を録音できませんでした";
 }
 
-export function VoiceRecorder({ onDraft }: VoiceRecorderProps) {
+export function VoiceRecorder({ onDraft, onManualEntry }: VoiceRecorderProps) {
   const [state, setState] = useState<RecorderState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -66,17 +68,27 @@ export function VoiceRecorder({ onDraft }: VoiceRecorderProps) {
   useEffect(() => {
     if (state !== "recording") return;
     const timer = window.setInterval(() => {
-      setElapsedSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000));
+      const elapsedMs = Date.now() - startedAtRef.current;
+      setElapsedSeconds(Math.min(30, Math.floor(elapsedMs / 1_000)));
+      if (elapsedMs >= MAX_RECORDING_MS) {
+        const recorder = recorderRef.current;
+        if (recorder && recorder.state !== "inactive") {
+          setState("processing");
+          recorder.stop();
+          releaseStream();
+        }
+      }
     }, 500);
     return () => window.clearInterval(timer);
-  }, [state]);
+  }, [releaseStream, state]);
 
   const processAudio = useCallback(
-    async (audio: Blob) => {
+    async (audio: Blob, durationMs: number) => {
       const controller = new AbortController();
       abortRef.current = controller;
       const formData = new FormData();
       formData.append("audio", audio, "homerelay-audio.webm");
+      formData.append("durationMs", String(durationMs));
 
       try {
         const response = await fetch("/api/draft", {
@@ -84,8 +96,8 @@ export function VoiceRecorder({ onDraft }: VoiceRecorderProps) {
           method: "POST",
           signal: controller.signal,
         });
-        const payload: unknown = await response.json();
         if (!response.ok) throw new Error("draft request failed");
+        const payload: unknown = await response.json();
         const result = DraftResultSchema.parse(payload);
         if (mountedRef.current) onDraft(result);
       } catch (error) {
@@ -147,7 +159,11 @@ export function VoiceRecorder({ onDraft }: VoiceRecorderProps) {
           setState("error");
           return;
         }
-        void processAudio(audio);
+        const durationMs = Math.max(
+          1,
+          Math.min(MAX_RECORDING_MS, Date.now() - startedAtRef.current),
+        );
+        void processAudio(audio, durationMs);
       };
 
       recorder.start();
@@ -195,7 +211,7 @@ export function VoiceRecorder({ onDraft }: VoiceRecorderProps) {
             声で様子を伝える
           </h2>
           <p className="mt-1 text-sm text-[var(--color-secondary)]">
-            短く話すだけで、確認できる下書きに整えます。
+            30秒以内で短く話すと、確認できる下書きに整えます。
           </p>
         </div>
       </div>
@@ -255,10 +271,15 @@ export function VoiceRecorder({ onDraft }: VoiceRecorderProps) {
       ) : null}
 
       {state === "error" ? (
-        <button className="primary-button mt-5 w-full" onClick={beginRecording} type="button">
-          <RotateCcw aria-hidden="true" size={21} />
-          もう一度話す
-        </button>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <button className="primary-button" onClick={onManualEntry} type="button">
+            手入力する
+          </button>
+          <button className="secondary-button" onClick={beginRecording} type="button">
+            <RotateCcw aria-hidden="true" size={21} />
+            もう一度話す
+          </button>
+        </div>
       ) : null}
     </section>
   );

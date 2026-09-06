@@ -79,4 +79,39 @@ describe("ConfirmDraft", () => {
     expect(onRecordAgain).toHaveBeenCalledTimes(1);
     expect(onConfirmed).not.toHaveBeenCalled();
   });
+
+  it("starts empty in manual mode and validates before confirmation", async () => {
+    const onConfirmed = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ConfirmDraft
+        onConfirmed={onConfirmed}
+        onRecordAgain={vi.fn()}
+        result={null}
+      />,
+    );
+
+    expect(screen.getByText("手入力で申し送りを作成")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "AIの下書きを使わず手入力します。確認するまで共有されません。",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/合成AI下書き/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("今日の様子")).toHaveValue("");
+    expect(screen.getByLabelText("必要なもの")).toHaveValue("");
+
+    await user.click(screen.getByRole("button", { name: "これでOK" }));
+    expect(onConfirmed).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("今日の様子"), "合成テストの手入力です");
+    await user.click(screen.getByRole("button", { name: "これでOK" }));
+
+    expect(onConfirmed).toHaveBeenCalledWith({
+      conditionSummary: "合成テストの手入力です",
+      completedSummary: "",
+      nextRequest: "",
+      neededItems: [],
+    });
+  });
 });
